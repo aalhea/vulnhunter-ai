@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="docs/screenshots/hero-dark.png" alt="VulnHunter" width="100%">
-
 # ⚡ VulnHunter
 
 ### AI 原生漏洞挖掘平台
