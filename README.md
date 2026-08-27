@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="docs/screenshots/hero-dark.png" alt="VulnHunter" width="100%">
-
 # ⚡ VulnHunter
 
 ### The AI-Native Vulnerability Hunting Platform
