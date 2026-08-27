@@ -1,0 +1,30 @@
+# dsh-vulnhunter bundle patch。
+#
+# 三件事：
+# 1. 注册包内 presets/ 为只读预设根（「漏洞挖掘模式」出现在 Web 预设列表）；
+# 2. 挂载 vulnhunter 主插件（recon_*/ledger_*/vuln_report/recon_pipeline 工具组，
+#    内置 scope 护栏与 artifact 纪律）；config 留默认值，用户可整节覆盖；
+# 3. skills/memory 以文件形式由 install.ps1 复制到 $DSH_HOME 对应扫描路径。
+
+- insert:
+    - id: vulnhunter-preset-root
+      name: 'dsh-vulnhunter/preset-root'
+
+    - id: vulnhunter
+      name: 'dsh-vulnhunter/index'
+      config:
+        toolsDir: ''            # 留空从 PATH 解析；或指向 enscan/amass/gogo/httpx 所在目录
+        artifactsRoot: ''       # 留空用 $DSH_HOME/vulnhunter/artifacts
+        scopeFile: ''           # 授权范围文件；强烈建议按目标配置（config/scope.example.yaml 模板）
+        defaultMode: ask        # ask | auto | step
+        fofaEmail: ''           # 建议改用环境变量 FOFA_EMAIL / FOFA_KEY / SHODAN_KEY 注入
+        fofaKey: ''
+        shodanKey: ''
+
+# P2 预留：并发写/面板直读时迁移 sqlite backend。
+# - patch:
+#     - id: storage-domain
+#       config:
+#         backend: json
+#         routes:
+#           vulnhunter: sqlite

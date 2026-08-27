@@ -1,0 +1,62 @@
+/*
+示例: [镜像] mirrorHTTPFlow 全量流量被动扫描
+关键词: mirrorHTTPFlow, MITM 热加载, 镜像流量, 被动扫描, 敏感信息, 仅观察
+适用场景: 对经过 MITM 的每一个请求响应做被动分析 (敏感信息泄露/统计), 镜像类只能观察不能改写
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 镜像类
+
+签名: mirrorHTTPFlow(isHttps, url, req, rsp, body)
+  - 每个完整请求响应都会触发 (含全部流量), 是最常用的被动观察入口
+  - 镜像类 hook (mirror 开头) 没有 forward/drop, 无法修改通信, 只做旁路分析
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 在响应体里被动扫描常见敏感信息泄露
+// 关键词: re.FindAll, 敏感信息正则, 被动扫描
+LEAK_RULES = [
+    {"name": "private-key", "re": `-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----`},
+    {"name": "aws-akid", "re": `AKIA[0-9A-Z]{16}`},
+    {"name": "jwt", "re": `eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`},
+]
+
+FINDINGS = []
+
+scanLeak = func(url, body) {
+    text = string(body)
+    for rule in LEAK_RULES {
+        if len(re.FindAll(text, rule.re)) > 0 {
+            FINDINGS = append(FINDINGS, {"url": url, "type": rule.name})
+            log.warn("passive leak found: %s @ %s", rule.name, url)
+        }
+    }
+}
+
+mirrorHTTPFlow = func(isHttps, url, req, rsp, body) {
+    scanLeak(url, body)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mirror http flow passive scan self test")
+
+    req := []byte("GET /config HTTP/1.1\r\nHost: target.local\r\n\r\n")
+
+    leakBody = "token=eyJhbGciOiJIUzI1NiJ.eyJzdWIiOjEyMyJ.abcDEF_123 key=AKIAIOSFODNN7EXAMPLE"
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\n" + leakBody)
+    mirrorHTTPFlow(false, "http://target.local/config", req, rsp, []byte(leakBody))
+
+    cleanBody = "{\"status\":\"ok\"}"
+    rsp2 := []byte("HTTP/1.1 200 OK\r\n\r\n" + cleanBody)
+    mirrorHTTPFlow(false, "http://target.local/health", req, rsp2, []byte(cleanBody))
+
+    log.info(sprintf("findings: %v", FINDINGS))
+    assert len(FINDINGS) == 2, "should find jwt and aws akid in leak body, none in clean body"
+
+    log.info("mirror http flow passive scan self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

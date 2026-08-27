@@ -1,0 +1,57 @@
+/*
+示例: [全局] mockHTTPRequest 全局 kill-switch 拦截
+关键词: 全局热加载, GlobalHotPatch, mockHTTPRequest, kill-switch, 黑名单域名, 本地响应替代
+适用场景: 全局拦截发往黑名单域名 (如真实生产/第三方付费接口) 的请求, 用本地 mock 响应替代, 防止误伤
+参考: yak-project-public 024 Mock 重塑无污染客户端测试; 009 全局热加载
+
+签名: mockHTTPRequest(isHttps, url, req, mockResponse)
+  - 调用 mockResponse(rspString) 用本地响应替代, 原请求不出站; 不调用则正常出站
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+BLOCKED_HOSTS = ["pay.real-bank.com", "api.charge.example.com", "prod-db.internal"]
+
+isBlocked = func(url) {
+    for h in BLOCKED_HOSTS {
+        if str.Contains(url, h) {
+            return true
+        }
+    }
+    return false
+}
+
+mockHTTPRequest = func(isHttps, url, req, mockResponse) {
+    if !isBlocked(url) {
+        return
+    }
+    body = json.dumps({"ok": false, "blocked_by": "global-hotpatch", "url": url}, json.withIndent(""))
+    log.warn("global kill-switch blocked: %s", url)
+    mockResponse("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Yakit-Global-Blocked: 1\r\nContent-Length: " + sprintf("%d", len(body)) + "\r\n\r\n" + body)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mock kill-switch self test")
+
+    captured = {"rsp": ""}
+    mockResponse = func(rsp) { captured["rsp"] = rsp }
+
+    blockedReq := []byte("POST /charge HTTP/1.1\r\nHost: pay.real-bank.com\r\n\r\n{}")
+    mockHTTPRequest(true, "https://pay.real-bank.com/charge", blockedReq, mockResponse)
+    assert captured["rsp"] != "", "blocked host should be mocked"
+    assert str.Contains(captured["rsp"], "X-Yakit-Global-Blocked: 1"), "should carry blocked marker"
+
+    captured["rsp"] = ""
+    safeReq := []byte("GET / HTTP/1.1\r\nHost: test.local\r\n\r\n")
+    mockHTTPRequest(false, "http://test.local/", safeReq, mockResponse)
+    assert captured["rsp"] == "", "non-blocked host should pass through"
+
+    log.info("global mock kill-switch self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

@@ -1,0 +1,59 @@
+/*
+示例: [Web Fuzzer] afterRequest 解密响应让 Fuzzer 看明文
+关键词: afterRequest, Web Fuzzer 热加载, AES-CBC 解密, Base64, 返回值提交, 前端加密对抗
+适用场景: 服务端响应 body 是 AES-CBC 密文, 用 afterRequest 在回显前解成明文, 让 Fuzzer 结果直接可读
+参考: yak-project-public 270 前端 AES 加密测试; 043 热加载函数
+
+签名: afterRequest(https, originReq, req, originRsp, rsp) -> 返回 rsp (返回值即最终响应)
+注意: Web Fuzzer 的 afterRequest 用返回值提交, 与 MITM 的 forward 不同
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// AES-128, key/iv 16 字节 (Base64 表示, 替换为实际值)
+AES_KEY = codec.DecodeBase64("MTIzNDU2Nzg5MDEyMzQ1Ng==")~
+AES_IV = codec.DecodeBase64("MTIzNDU2Nzg5MDEyMzQ1Ng==")~
+
+afterRequest = func(https, originReq, req, originRsp, rsp) {
+    body = poc.GetHTTPPacketBody(rsp)
+    if len(body) == 0 {
+        return rsp
+    }
+    cipher, err = codec.DecodeBase64(string(body))
+    if err != nil {
+        return rsp
+    }
+    plain, err2 = codec.AESCBCDecrypt(AES_KEY, cipher, AES_IV)
+    if err2 != nil {
+        return rsp
+    }
+    return poc.ReplaceHTTPPacketBody(rsp, plain)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start webfuzzer after request decrypt self test")
+
+    plainRspBody = `{"code":0,"txn_id":"abc123"}`
+    encRsp = codec.EncodeBase64(codec.AESCBCEncrypt(AES_KEY, plainRspBody, AES_IV)~)
+    mockRsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + encRsp
+    mockReq = "POST /api/pay HTTP/1.1\r\nHost: bank.local\r\n\r\n"
+
+    decRsp = afterRequest(true, []byte(mockReq), []byte(mockReq), []byte(mockRsp), []byte(mockRsp))
+    decBody = string(poc.GetHTTPPacketBody(decRsp))
+    log.info("decrypted rsp body: " + decBody)
+    assert decBody == plainRspBody, "response decrypt mismatch"
+
+    // 非密文响应保持原样
+    plainRsp := []byte("HTTP/1.1 200 OK\r\n\r\nnot-base64-@@@")
+    out = afterRequest(true, []byte(mockReq), []byte(mockReq), plainRsp, plainRsp)
+    assert string(poc.GetHTTPPacketBody(out)) == "not-base64-@@@", "non-cipher response should remain unchanged"
+
+    log.info("webfuzzer after request decrypt self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

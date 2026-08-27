@@ -1,0 +1,68 @@
+/*
+示例: [流处理] mirrorHTTPFlow 提取参数链 (关联测试)
+关键词: mirrorHTTPFlow, Web Fuzzer 热加载, 参数提取, token, csrf, 多步关联, params fuzztag
+适用场景: 多步请求中, 从前一个响应里提取 token / csrf / session 注入到下一个请求
+参考: yak-project-public 167 (2023-11-17) Web Fuzzer 进阶; 043 热加载函数
+
+注意: Web Fuzzer 的 mirrorHTTPFlow 签名是 (req, rsp, params), 返回的 map 会作为 {{params(name)}} 的输入
+      这与 MITM 的 mirrorHTTPFlow(isHttps, url, req, rsp, body) 不同, 不要混淆
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+mirrorHTTPFlow = func(req, rsp, params) {
+    if params == nil {
+        params = {}
+    }
+    params["current_status_code"] = sprintf("%d", poc.GetStatusCodeFromResponse(rsp))
+
+    csrf = poc.GetHTTPPacketHeader(rsp, "X-CSRF-Token")
+    if csrf != "" {
+        params["csrf_token"] = csrf
+    }
+
+    body = poc.GetHTTPPacketBody(rsp)
+    if len(body) > 0 {
+        tryParse = func() {
+            defer func {
+                err = recover()
+                if err != nil { log.warn("mirror flow: response body is not json") }
+            }
+            data = json.loads(string(body))
+            for k in ["access_token", "token", "session_id"] {
+                v = data[k]
+                if v != nil { params[k] = sprintf("%v", v) }
+            }
+        }
+        tryParse()
+    }
+    return params
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mirror flow extract params self test")
+
+    mockReq := []byte("GET /api/login HTTP/1.1\r\nHost: test.local\r\n\r\n")
+    mockRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-CSRF-Token: csrf-abc-123\r\n\r\n{\"access_token\":\"tok_xyz\",\"session_id\":\"sess_1\"}")
+
+    result = mirrorHTTPFlow(mockReq, mockRsp, {})
+    log.info(sprintf("extracted: %v", result))
+    assert result["current_status_code"] == "200", "should extract status code"
+    assert result["csrf_token"] == "csrf-abc-123", "should extract csrf from header"
+    assert result["access_token"] == "tok_xyz", "should extract access_token from body"
+    assert result["session_id"] == "sess_1", "should extract session_id from body"
+
+    // nil params 与非 json 响应都应正常
+    htmlRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>not json</html>")
+    result2 = mirrorHTTPFlow(mockReq, htmlRsp, nil)
+    assert result2["current_status_code"] == "200", "non-json should still extract status"
+
+    log.info("mirror flow extract params self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

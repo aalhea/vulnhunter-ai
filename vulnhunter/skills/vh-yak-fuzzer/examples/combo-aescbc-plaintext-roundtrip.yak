@@ -1,0 +1,84 @@
+/*
+组合示例: [前端加密对抗] AES-CBC 请求加密 + 响应解密, 让你在 Fuzzer 里"写明文 / 看明文"
+关键词: 前端加密, CryptoJS AES-CBC, beforeRequest, afterRequest, 让用户看到明文, 爆破, PKCS7
+适用场景: 前端 CryptoJS.AES.encrypt(word, key, {iv}) 把登录 body 加密成密文; 静态硬编码 KEY + 固定 IV
+         装上本组合后, 你在 Web Fuzzer 里直接对明文 JSON 做 fuzz, 发包自动加密、响应自动解密
+参考: yak-project-public 183 渗透测试高级技巧 分析验签与前端加密(一)
+
+前端 JS (截图还原):
+  function generateKey(){ return CryptoJS.enc.Utf8.parse("1234123412341234") } // 硬编码密钥
+  function Encrypt(word){ return CryptoJS.AES.encrypt(word, key, {iv}).toString() }
+
+组合 = beforeRequest(加密出站) + afterRequest(解密回显), 二者协作让链路对你"透明"
+
+!! 并发安全: 顶层只放常量 (KEY/IV), hook 内不写共享可变全局, 天然无竞争 !!
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 顶层全局只放"只读常量"(HACK 出来的硬编码密钥/IV): 加载时赋值一次, hook 内绝不修改
+// 这样多请求并发执行同一个 hook 时不会写同一份全局状态, 天然无数据竞争
+// 关键词: 只读常量配置, 并发安全, codec.DecodeHex, AES-CBC PKCS7
+AES_KEY = codec.DecodeHex("31323334313233343132333431323334")~  // "1234123412341234"
+AES_IV = codec.DecodeHex("0e32a6c40da89058b6451c717d648cb7")~
+
+// 出站前: 把明文 body 加密成 Base64 密文 (模拟前端 Encrypt)
+beforeRequest = func(https, originReq, req) {
+    body = poc.GetHTTPPacketBody(req)
+    if len(body) == 0 {
+        return req
+    }
+    cipher = codec.AESCBCEncryptWithPKCS7Padding(AES_KEY, body, AES_IV)~
+    return poc.ReplaceHTTPPacketBody(req, codec.EncodeBase64(cipher))
+}
+
+// 回显前: 把密文响应解成明文 (让用户在 Fuzzer 里看到明文, 方便判断爆破成功)
+afterRequest = func(https, originReq, req, originRsp, rsp) {
+    body = poc.GetHTTPPacketBody(rsp)
+    if len(body) == 0 {
+        return rsp
+    }
+    raw, err = codec.DecodeBase64(string(body))
+    if err != nil {
+        return rsp
+    }
+    plain, err2 = codec.AESCBCDecryptWithPKCS7Padding(AES_KEY, raw, AES_IV)
+    if err2 != nil {
+        return rsp
+    }
+    return poc.ReplaceHTTPPacketBody(rsp, plain)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start combo aes-cbc plaintext roundtrip self test")
+
+    // 你在 Fuzzer 里写的明文请求
+    plainBody = `{"username":"admin","password":"123456"}`
+    plainReq = "POST /crypto/js/lib/aes/cbc HTTP/1.1\r\nHost: t.local\r\nContent-Type: application/json\r\n\r\n" + plainBody
+
+    // beforeRequest 把它加密出站
+    encReq = beforeRequest(false, []byte(plainReq), []byte(plainReq))
+    encBody = string(poc.GetHTTPPacketBody(encReq))
+    log.info("encrypted out-bound body (base64): " + encBody)
+    assert encBody != plainBody, "body should be encrypted before out-bound"
+    // 与文章 183 给出的真实密文一致, 证明算法选型正确
+    assert encBody == "lvIsXDQECZuulFJf4FsG+MGESw+NHG0sp78Gz7uuFvYuABq/H4aHT7RDpNUoV5Yc", "ciphertext should match article 183"
+
+    // 服务端返回密文响应 -> afterRequest 解成明文
+    rspPlain = `{"success":true,"role":"admin"}`
+    rspCipher = codec.EncodeBase64(codec.AESCBCEncryptWithPKCS7Padding(AES_KEY, rspPlain, AES_IV)~)
+    encRsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + rspCipher
+    decRsp = afterRequest(false, []byte(plainReq), encReq, []byte(encRsp), []byte(encRsp))
+    decBody = string(poc.GetHTTPPacketBody(decRsp))
+    log.info("decrypted response body: " + decBody)
+    assert decBody == rspPlain, "response should be decrypted to plaintext for the user to read"
+
+    log.info("combo aes-cbc plaintext roundtrip self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

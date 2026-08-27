@@ -1,0 +1,76 @@
+# dsh-vulnhunter 默认侦察流水线 v2（快准狠）
+#
+# 链条：① company-expand → ② subdomain-enum(+情报并行) → ③ port-scan(gogo) → ④ alive-probe(httpx) → ⑤ report
+# 顺序固定不可乱；但支持【任意选段】——会话里说「只跑1,2,4」即可（P1 起 recon_run --steps 承载）。
+# 选段时若缺上游产物：优先读 <target>/artifacts/ 历史产物接力；没有则提示先补跑依赖步骤。
+#
+# 覆盖顺序（高→低）：运行时指令 > 用户 steps.yaml（复制本文件到 $DSH_HOME/vulnhunter/steps.yaml 改）
+# > 本内置默认。
+
+pipeline:
+  modes: [ask, auto, step]      # ask=每步确认可跳过 / auto=全自动 / step=单步推进
+  default_mode: ask
+  select_syntax: "1,2,4"        # 按 seq 号选段；report(5) 缺省总是收尾
+
+  steps:
+    - id: company-expand
+      seq: 1
+      tool: enscan
+      desc: 公司名 → 根域名 / 子公司 / ICP / App / 小程序
+      cli: enscan -company {company} -deep {deep} -o {artifact}
+      artifact: artifacts/1-company-expand.json
+      default_prompt: |
+        分析 enscan 产物，输出：根域名清单、高价值资产线索（登录后台/API/管理端点）、
+        小程序/App 清单。只给结构化结论，不贴原文。
+      allow_skip: true           # 直接给域名列表时可跳过
+
+    - id: subdomain-enum
+      seq: 2
+      tool: amass+intel          # fofa/shodan 与 amass 同时发起（并行被动源），无 key 自动降级跳过
+      desc: 子域枚举（被动）+ 被动情报并行汇总
+      cli:
+        amass: amass enum -passive -d {domain} -o {artifact}
+        intel_fofa: 'domain="{domain}"'     # key 缺失则跳过
+        intel_shodan: 'hostname:{domain}'   # key 缺失则跳过
+      post: wildcard-dedupe      # 确定性后处理：泛解析基线检测 + 多源去重 + CDN/CNAME 归并 + 死域剔除
+      artifact: artifacts/2-subdomains.txt
+      default_prompt: |
+        对去重后的子域清单分组；标注疑似测试环境/边缘业务（test/uat/pre/gray/old 命名特征）；
+        给出 top 风险候选与理由。原始清单勿全文输出，引用 artifact 路径。
+      allow_skip: true
+
+    - id: port-scan
+      seq: 3
+      tool: gogo                 # chainreactors/gogo：端口 + 服务/漏洞指纹 + http URL 发现，最小发包原则
+      desc: 端口扫描 + 服务指纹（对子域解析 IP；仅授权含 C 段时才扫 C 段）
+      cli: gogo -i {targets} -p top2,top3 --af {artifact_dir}
+      input_note: targets = 子域解析后的 IP 列表（nslookup/dig 批量），scope.yaml 允许的网段
+      artifact: artifacts/3-gogo/
+      default_prompt: |
+        从 gogo 结果提取：开放端口表、服务指纹分布、发现的 http 服务 URL 清单、
+        命中的弱特征/已知组件告警。按"疑似后台/中间件控制台/老旧组件"排优先级。
+      allow_skip: true
+
+    - id: alive-probe
+      seq: 4
+      tool: httpx
+      desc: 存活探测 + Web 指纹（输入 = URL 构造结果）
+      input_build: |
+        【url-build —— 确定性逻辑，不消耗 AI】
+        探测清单 =
+          gogo 输出中已判定的 http 服务 URL（scheme://host:port 已明确，直接采用）
+          ∪ 子域清单裸域名（httpx 自动尝试 http:// 和 https:// 默认口）
+        去重合并写入 artifacts/4-candidates.txt 后再喂 httpx。
+      cli: httpx -l {candidates} -tech-detect -status-code -title -json -o {artifact}
+      artifact: artifacts/4-alive.json
+      default_prompt: |
+        按指纹聚类存活资产；标出登录页、API 网关、上传点、老旧组件、swagger/api-docs；
+        结合 gogo 端口结论给下一步攻击优先级。每个活站的前端 JS 可转交 vh-jss 提取隐藏 API。
+      allow_skip: false          # 存活清单是后续一切测试的底座，不允许跳过
+
+    - id: report
+      seq: 5
+      tool: report               # P1: vuln_report 工具
+      desc: 汇总侦察报告
+      artifact: artifacts/5-report.md
+      allow_skip: false

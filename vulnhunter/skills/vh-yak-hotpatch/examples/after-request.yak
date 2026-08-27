@@ -1,0 +1,38 @@
+/*
+示例: [全局] afterRequest 全站统一响应审计标记
+关键词: 全局热加载, GlobalHotPatch, afterRequest, 返回值提交, 响应回写前
+适用场景: 在响应回写前的最后时刻, 全站统一补一个审计头 (含状态码), 用 return 提交
+参考: yak-project-public 009 全局热加载
+
+签名: afterRequest(isHttps, oreq, req, orsp, rsp) -> return rsp (用返回值提交, 不是 forward)
+全局先执行, 模块 afterRequest 后执行
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+afterRequest = func(isHttps, oreq, req, orsp, rsp) {
+    code = poc.GetStatusCodeFromResponse(rsp)
+    return poc.ReplaceHTTPPacketHeader(rsp, "X-Yakit-Global-Audit", sprintf("status=%d", code))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global after request audit self test")
+
+    oreq := []byte("GET / HTTP/1.1\r\nHost: t.local\r\n\r\n")
+    rsp := []byte("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\n\r\nbusy")
+
+    out = afterRequest(false, oreq, oreq, rsp, rsp)
+    audit = poc.GetHTTPPacketHeader(out, "X-Yakit-Global-Audit")
+    log.info("audit header: " + audit)
+    assert audit == "status=503", "audit header should capture status code"
+    assert string(poc.GetHTTPPacketBody(out)) == "busy", "body should remain intact"
+
+    log.info("global after request audit self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

@@ -1,0 +1,66 @@
+/*
+示例: db 库 - 临时 SQLite 建表/增删改查/聚合
+关键词: db.OpenTempSqliteDatabase, db.ScanResult, Exec, SQL, CRUD, 参数化查询, 聚合
+适用场景: 在脚本里临时落地结构化数据 (扫描结果/资产/中间表), 用 SQL 做查询统计
+参考: yaklang-ai-training-materials library-usage/db/db-practice.yak
+
+要点:
+  - db.OpenTempSqliteDatabase() 返回 (gormDB, err), 用 ~ 处理错误
+  - 写操作走 tempDB.Exec(sql, args...).Error
+  - 读操作走 db.ScanResult(tempDB, sql, args...) 返回 []map, 每行是一个 map
+  - 参数化查询用 ? 占位, 防注入
+*/
+
+func testSqliteCrud() {
+    log.info("open temp sqlite database")
+    tempDB = db.OpenTempSqliteDatabase()~
+    assert tempDB != nil, "temp db should not be nil"
+
+    // 建表
+    // 关键词: CREATE TABLE, DDL, .Error 是字段不是函数, 不能用 ~
+    createErr = tempDB.Exec(`CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        price INTEGER,
+        category TEXT
+    )`).Error
+    assert createErr == nil, f"create table failed: ${createErr}"
+
+    // 插入 (参数化)
+    // 关键词: INSERT, 参数化查询, ? 占位
+    rows = [
+        ["laptop", 8000, "Electronics"],
+        ["mouse", 120, "Electronics"],
+        ["book", 60, "Media"],
+        ["pen", 5, "Media"],
+    ]
+    for r in rows {
+        insErr = tempDB.Exec("INSERT INTO products (name, price, category) VALUES (?, ?, ?)", r[0], r[1], r[2]).Error
+        assert insErr == nil, f"insert failed: ${insErr}"
+    }
+
+    // 查询全部
+    // 关键词: db.ScanResult, SELECT
+    all = db.ScanResult(tempDB, "SELECT * FROM products ORDER BY id")~
+    assert len(all) == 4, f"should have 4 products, got ${len(all)}"
+    assert all[0]["name"] == "laptop", "first row name"
+    log.info(sprintf("queried %d products", len(all)))
+
+    // 条件查询 (参数化)
+    electronics = db.ScanResult(tempDB, "SELECT * FROM products WHERE category = ? ORDER BY price DESC", "Electronics")~
+    assert len(electronics) == 2, "should have 2 electronics"
+    assert electronics[0]["name"] == "laptop", "most expensive electronics first"
+
+    // 聚合查询
+    // 关键词: GROUP BY, COUNT, AVG
+    stats = db.ScanResult(tempDB, `SELECT category, COUNT(*) as cnt, AVG(price) as avg_price
+        FROM products GROUP BY category ORDER BY avg_price DESC`)~
+    assert len(stats) == 2, "should have 2 category groups"
+    for s in stats {
+        log.info(sprintf("category=%v count=%v avg=%v", s["category"], s["cnt"], s["avg_price"]))
+    }
+
+    log.info("sqlite crud self test passed")
+}
+
+testSqliteCrud()

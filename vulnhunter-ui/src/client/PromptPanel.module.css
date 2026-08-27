@@ -1,0 +1,157 @@
+/* PromptPanel — 预设 Prompt 面板 */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+/* 筛选标签 */
+.filterRow {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.filterBadge {
+  padding: 2px 8px;
+  border: 1px solid var(--vh-border);
+  border-radius: 100px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.filterBadge:hover {
+  background: var(--vh-hover);
+  border-color: var(--vh-border-strong);
+}
+
+.filterBadgeActive {
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  color: var(--vh-accent-text);
+  box-shadow: var(--vh-accent-glow);
+}
+
+/* 列表 */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.promptCard {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  border: 1px solid var(--vh-border);
+  background: var(--vh-panel);
+  overflow: hidden;
+  transition: border-color 200ms, background 250ms ease;
+}
+
+.promptCard:hover {
+  border-color: var(--vh-border-strong);
+}
+
+.promptHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms;
+}
+
+.promptHeader:hover {
+  background: var(--vh-hover);
+}
+
+.promptChevron {
+  font-size: 8px;
+  color: var(--vh-text-3);
+  transition: transform 200ms cubic-bezier(.22, .61, .36, 1);
+  width: 12px;
+  text-align: center;
+  flex: none;
+}
+
+.promptChevronOpen {
+  transform: rotate(90deg);
+}
+
+.promptTitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vh-text-1);
+}
+
+/* 折叠内容 */
+.promptBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 0 20px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 250ms cubic-bezier(.22, .61, .36, 1),
+              opacity 200ms ease,
+              padding 200ms ease;
+}
+
+.promptBodyOpen {
+  max-height: 400px;
+  opacity: 1;
+  padding: 0 8px 8px 20px;
+}
+
+.promptContent {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--vh-text-2);
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--vh-code);
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.promptActions {
+  display: flex;
+  gap: 6px;
+}
+
+.actionBtn {
+  padding: 3px 10px;
+  border: 1px solid var(--vh-border);
+  border-radius: 6px;
+  background: var(--vh-panel-raised);
+  color: var(--vh-text-2);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 200ms, color 200ms, border-color 200ms;
+}
+
+.actionBtn:hover {
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  color: var(--vh-accent-text);
+}
+
+/* 减小动画 */
+@media (prefers-reduced-motion: reduce) {
+  .promptBody {
+    transition: none;
+  }
+}

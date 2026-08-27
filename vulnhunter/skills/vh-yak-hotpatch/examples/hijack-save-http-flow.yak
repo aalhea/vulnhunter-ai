@@ -1,0 +1,80 @@
+/*
+示例: [全局] 全站流量按状态码自动染色 + 打标签
+关键词: 全局热加载, GlobalHotPatch, hijackSaveHTTPFlow, 流量染色, AddTag, 状态码, 全站分类
+适用场景: 全站统一在入库时按响应状态码染色 (5xx 红 / 401-403 橙 / 3xx 黄), 便于在历史里快速定位异常流量
+参考: yak-project-public 030 (2025-10-24) Yakit 热加载实战技巧; 009 全局热加载
+
+注意: hijackSaveHTTPFlow 是全局与模块共享 hook, 全局先执行
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+applyColor = func(flow, color) {
+    if color == "Red" { flow.Red() }
+    if color == "Orange" { flow.Orange() }
+    if color == "Yellow" { flow.Yellow() }
+}
+
+colorByStatus = func(flow) {
+    rsp = codec.StrconvUnquote(flow.Response)~
+    code = poc.GetStatusCodeFromResponse(rsp)
+    if code >= 500 {
+        flow.AddTag("server-error")
+        applyColor(flow, "Red")
+    } else if code == 401 || code == 403 {
+        flow.AddTag("auth-denied")
+        applyColor(flow, "Orange")
+    } else if code >= 300 && code < 400 {
+        flow.AddTag("redirect")
+        applyColor(flow, "Yellow")
+    }
+}
+
+hijackSaveHTTPFlow = func(flow, modify, drop) {
+    colorByStatus(flow)
+    modify(flow)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func makeFlow(rsp, tags, colors) {
+    flow = make(map[string]any)
+    flow["Response"] = codec.StrconvQuote(rsp)
+    flow["AddTag"] = func(t...) { for one in t { tags["v"] = append(tags["v"], one) } }
+    flow["Red"] = func() { colors["v"] = append(colors["v"], "Red") }
+    flow["Orange"] = func() { colors["v"] = append(colors["v"], "Orange") }
+    flow["Yellow"] = func() { colors["v"] = append(colors["v"], "Yellow") }
+    return flow
+}
+
+func runSelfTest() {
+    log.info("start global flow coloring self test")
+
+    // 500 -> red + server-error
+    tags = {"v": []}; colors = {"v": []}
+    saved = []
+    modify = func(f) { saved = append(saved, f) }
+    drop = func() { log.error("should not drop") }
+    hijackSaveHTTPFlow(makeFlow("HTTP/1.1 500 Internal Server Error\r\n\r\n", tags, colors), modify, drop)
+    assert "server-error" in tags["v"], "500 should be tagged server-error"
+    assert "Red" in colors["v"], "500 should be colored red"
+
+    // 403 -> orange + auth-denied
+    tags = {"v": []}; colors = {"v": []}
+    hijackSaveHTTPFlow(makeFlow("HTTP/1.1 403 Forbidden\r\n\r\n", tags, colors), modify, drop)
+    assert "auth-denied" in tags["v"], "403 should be tagged auth-denied"
+    assert "Orange" in colors["v"], "403 should be colored orange"
+
+    // 200 -> 不染色
+    tags = {"v": []}; colors = {"v": []}
+    hijackSaveHTTPFlow(makeFlow("HTTP/1.1 200 OK\r\n\r\nok", tags, colors), modify, drop)
+    assert len(colors["v"]) == 0, "200 should not be colored"
+
+    assert len(saved) == 3, "modify should be called for every flow"
+    log.info("global flow coloring self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

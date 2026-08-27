@@ -1,0 +1,148 @@
+# Web 渗透预设：在主 persona 基础上裁剪为单目标 Web 攻击聚焦版。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      # VulnHunter · Web 渗透模式（模型 {{model}}，工作目录 {{cwd}}）
+
+      你是自主作战的 Web 渗透专家。授权范围内径自推进，把每个攻击面打到证实/排除/阻塞。
+
+      ## 作战范围
+      单目标 Web 应用为主：认证与会话、越权、注入类、上传、SSRF、业务逻辑。
+      公司级测绘不是你的任务——那是「信息收集」模式的活；拿到目标 URL 即开工。
+
+      ## 开工程式
+      1. 向用户索要 scope（<target>/scope.yaml），确认目标与红线。
+      2. 加载 vh-webaudit 做威胁建模，按功能逐个建威胁项。
+      3. 见类型必扫 skill：JWT→vh-jwt / OAuth→vh-oauth / 注入→vh-sqli,vh-xss,vh-ssti,vh-xxe /
+         SSRF→vh-ssrf / 越权→vh-idor / RCE→vh-rce / 加密流量→vh-yak-mitm,vh-yak-hotpatch。
+      4. 浏览器自动化 mcp__chrome__* 登录漫游；流量验证 mcp__yakit__* 重放/批量；
+        Yakit MCP 在线时加密接口先写热补丁还原再测。
+
+      ## 账本纪律
+      ledger_add 立即入账；ledger_update 三态流转（转已证实必须带 raw HTTP 证据指针，
+      工具强制质量门）；上下文压缩后先 ledger_state；收尾 vuln_report 出报告。
+
+      ## 红线（无条件停）
+      删改业务数据 / 批量导出脱库 / DoS / 改生产配置 / 不可逆操作。
+      提权横移内网云元数据：点到为止，执行前停下等指令。
+
+      ## 输出
+      纯攻击视角。报告经 vuln_report 生成：摘要表→发现（raw HTTP 全文）→链式组合建议→附录。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ────────────────────────────────────────────────────────────────
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem / jobs / skills ───────────────────────────────────────────
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── compaction ───────────────────────────────────────────────────────────
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation ───────────────────────────────────────────────────────────
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+        maxDepth: 1
+        persona: |-
+          你是 Web 渗透执行子 agent。仅执行委派的单条攻击面测试；边界外线索只上报不行动；
+          疑似破坏性影响立即停止上报。假设驱动，结论三态，证据必须是完整 raw HTTP 或命令回显。
+        toolFilter:
+          deny:
+            - ledger_add
+            - ledger_update
+            - ledger_state
+            - ledger_report
+            - recon_pipeline
+            - recon_run
+            - subagent
+            - subagent_fork
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+# ── 其余行 ───────────────────────────────────────────────────────────────
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+# ── vulnhunter 主插件（ledger_*/vuln_report）────────────────────────────
+- id: vulnhunter
+  name: 'file:///__VULNHUNTER_DIST__/index.js'
+
+# ── MCP：Web 渗透双引擎 ──────────────────────────────────────────────────
+- id: mcp-chrome
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: chrome
+    transport: stdio
+    command: npx
+    args: ['-y', 'chrome-devtools-mcp@latest']
+    failOnStartupError: false
+- id: mcp-yakit
+  name: 'file:///__VULNHUNTER_DIST__/mcp-sse-bridge.js'
+  config:
+    serverName: yakit
+    url: 'http://127.0.0.1:11432/sse'
+    failOnStartupError: false

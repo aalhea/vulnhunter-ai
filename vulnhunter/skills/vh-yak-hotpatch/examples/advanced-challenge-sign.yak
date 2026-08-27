@@ -1,0 +1,123 @@
+/*
+示例: [全局] 动态 Challenge + HMAC 签名注入 + 响应解密 (Vulinbox 靶场)
+关键词: 全局热加载, GlobalHotPatch, challenge, HMAC-SHA256, AES-CBC, beforeRequest, afterRequest, hijackSaveHTTPFlow, 前端加密对抗
+适用场景: 接口需要先 GET /api/get-challenge 拿到加密 challenge, 解密出 nonce, 用 HMAC 计算签名写入 X-Auth-Signature, 受保护接口响应又是 AES-CBC 密文
+参考: yak-project-public 009 (2026-03-18) 前端加密测不动 全局热加载帮你自动接管签名流程
+
+链路:
+  beforeRequest  -> 命中目标接口时自动获取 challenge 并补 X-Auth-Signature
+  afterRequest   -> 带 X-Yak-Force-Plaintext:1 时把响应解成明文 (避免破坏浏览器前端解密)
+  hijackSaveHTTPFlow -> MITM 入库时把响应改写成明文便于分析
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 靶场固定参数 (来自 Vulinbox crypto challenge)
+API_AES_KEY = "YakitVulinboxAES"
+API_SIGN_KEY = "YakitVulinboxHMACKey-SIGNATURE"
+TARGET_PATH = "/api/user/info"
+CHALLENGE_PATH = "/api/get-challenge"
+PLAINTEXT_HEADER = "X-Yak-Force-Plaintext"
+
+isTargetRequest = func(isHttps, packet) {
+    u, err = str.ExtractURLFromHTTPRequestRaw(packet, isHttps)
+    if err != nil {
+        return false
+    }
+    return str.Contains(u.String(), TARGET_PATH)
+}
+
+// 解析 challenge 响应包 -> 计算签名 (纯函数, 不发请求, 便于自测)
+// 关键词: codec.DecodeBase64, codec.AESCBCDecrypt, codec.HmacSha256
+signChallengeResponse = func(challengeRsp) {
+    body = poc.GetHTTPPacketBody(challengeRsp)
+    params = json.loads(body)
+    nonce = codec.AESCBCDecrypt(API_AES_KEY, codec.DecodeBase64(params.challenge)~, codec.DecodeBase64(params.iv)~)~
+    return codec.EncodeToHex(codec.HmacSha256(API_SIGN_KEY, nonce))
+}
+
+// 解密受保护接口响应 (data + iv 信封) -> 返回明文替换后的数据包
+decryptProtectedResponse = func(packet) {
+    body = string(poc.GetHTTPPacketBody(packet))
+    if !str.Contains(body, `"data"`) || !str.Contains(body, `"iv"`) {
+        return packet
+    }
+    params = json.loads(body)
+    plain = codec.AESCBCDecrypt(API_AES_KEY, codec.DecodeBase64(params.data)~, codec.DecodeBase64(params.iv)~)~
+    return poc.ReplaceHTTPPacketBody(packet, plain)
+}
+
+// 在线发副请求获取 challenge 并签名 (实际使用时由热加载在线触发)
+fetchChallengeSignature = func(isHttps, packet) {
+    host = poc.GetHTTPPacketHeader(packet, "Host")
+    if host == "" {
+        panic("global hotpatch: request host is empty")
+    }
+    challengeReq = "GET " + CHALLENGE_PATH + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n"
+    challengeRsp, _ = poc.HTTP(challengeReq, poc.https(isHttps), poc.timeout(5), poc.save(false))~
+    return signChallengeResponse(challengeRsp)
+}
+
+beforeRequest = func(isHttps, originReq, req) {
+    if !isTargetRequest(isHttps, req) {
+        return req
+    }
+    sig = fetchChallengeSignature(isHttps, req)
+    return poc.ReplaceHTTPPacketHeader(req, "X-Auth-Signature", sig)
+}
+
+afterRequest = func(isHttps, originReq, req, originRsp, rsp) {
+    if !isTargetRequest(isHttps, req) {
+        return rsp
+    }
+    if poc.GetHTTPPacketHeader(req, PLAINTEXT_HEADER) != "1" {
+        return rsp
+    }
+    return decryptProtectedResponse(rsp)
+}
+
+hijackSaveHTTPFlow = func(flow, modify, drop) {
+    req = codec.StrconvUnquote(flow.Request)~
+    if !isTargetRequest(false, req) && !isTargetRequest(true, req) {
+        modify(flow)
+        return
+    }
+    rsp = codec.StrconvUnquote(flow.Response)~
+    flow.Response = codec.StrconvQuote(string(decryptProtectedResponse(rsp)))
+    modify(flow)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+用文章 009 给出的真实抓包数据离线验证两个纯函数 (不依赖在线靶场)
+*/
+func runSelfTest() {
+    log.info("start global challenge sign self test")
+
+    // 真实 challenge 响应包 (来自文章 009)
+    challengeRsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" +
+        `{"challenge":"ifIYn2ChP6pOaedUtwRg8urjclJJazl2N8eSrcEUo1OZz7+AT+9ERWnJVGxtdQUU","iv":"tYJG4EX4pOICNfXbAT2lkg=="}`
+    sig = signChallengeResponse([]byte(challengeRsp))
+    log.info("computed signature: " + sig)
+    assert sig == "c9f36e99b46389cefc289002c02f88548403de96d0facf8a6cc99d1ded27f632", "signature should match known value from article 009"
+
+    // 真实受保护响应包 (来自文章 009) -> 解密应得到 admin 用户信息
+    protectedRsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" +
+        `{"data":"xLZ8ri0BmAqw72zNycPmzSQ1qkJ+QVASKyqy6j/D7rLjRyBwT/Tpn5BJCjLfEMVEReS9iglSFzikuQvL1q+NSwiMCHHWFRyybPyq9oUXd+xR/1xFIxCCoNM8Ud5JG+3HDlW8lJZ4Yo9dM9snojIf3Ks+dHl8kBTD8ePARUllTJ9MwXst/33X23acG27BtPJycvn/bptDTfqKyknPLdIQYwM0ozrteuCTGcjLWH0DtnH2CW8D46PuMtpgXKd9HyRhcBIu+uuY5Z+vSTPe48TwARuhX9FUG/F/odywOW5EalA=","iv":"4DqWSC1nHDF9AX183lb1DQ=="}`
+    dec = decryptProtectedResponse([]byte(protectedRsp))
+    decBody = string(poc.GetHTTPPacketBody(dec))
+    log.info("decrypted body: " + decBody)
+    assert str.Contains(decBody, "admin@yaklang.io"), "decrypted body should contain admin email"
+    assert str.Contains(decBody, "successfully passed the challenge"), "decrypted body should contain success message"
+
+    // 非目标请求 afterRequest 不应改写
+    nonTarget := []byte("GET /static/app.js HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    out = afterRequest(false, nonTarget, nonTarget, []byte(""), []byte("HTTP/1.1 200 OK\r\n\r\nraw"))
+    assert string(poc.GetHTTPPacketBody(out)) == "raw", "non-target response should remain unchanged"
+
+    log.info("global challenge sign self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

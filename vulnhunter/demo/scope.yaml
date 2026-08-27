@@ -1,0 +1,12 @@
+# 第一轮实测演示目标：example.com（IANA 保留文档域，公认可安全探测）。
+# 真实使用时复制本文件按你的 SRC 目标改写。
+
+target: demo
+domains:
+  - example.com
+excludes: []
+cidr: []                        # 未授权网段 → gogo 步骤应被护栏拦截（预期行为）
+rules:
+  passive_first: true
+authorized_by: "IANA reserved doc domain（演示）"
+valid_until: "2027-12-31"

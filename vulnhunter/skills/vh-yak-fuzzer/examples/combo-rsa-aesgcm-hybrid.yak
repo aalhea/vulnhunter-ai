@@ -1,0 +1,104 @@
+/*
+组合示例: [前端加密对抗] RSA-OAEP + AES-GCM 混合加密, fuzztag 加密请求 + mirrorHTTPFlow 解密响应
+关键词: 前端加密, 混合加密, RSA-OAEP, AES-GCM, fuzztag, mirrorHTTPFlow, 让用户看到明文, 动态公钥, 序列
+适用场景: 最严密的一类防护 —— 先 GET 拿服务器公钥, 用 AES-GCM 加密真实数据, 再用 RSA-OAEP 包裹 AES 的
+         key/iv 一起发出; 响应同样是密文。本组合: fuzztag 负责加密请求, mirrorHTTPFlow 负责解密响应,
+         把明文结果提取出来让你一眼看出爆破是否成功
+参考: yak-project-public 177 渗透测试高级技巧(二) 对抗前端动态密钥与非对称加密防护
+
+配合 Web Fuzzer 序列使用:
+  Step[0] GET /crypto/js/rsa/generator  -> 数据提取器提取 publicKey / privateKey
+  Step[1] POST .../aes-gcm  body:
+    {"data":"{{yak(aesGCM|abc)}}","iv":"aaaaaaaaaaaa",
+     "encryptedIV":"{{yak(rsaOAEP_iv|{{params(publicKey)}})}}",
+     "encryptedKey":"{{yak(rsaOAEP_key|{{params(publicKey)}})}}"}
+
+!! 并发安全: AES_KEY/AES_IV 是只读常量; publicKey/privateKey 走函数入参(序列变量), 不写共享全局 !!
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 只读常量: 客户端自选的 AES-GCM 密钥/IV (硬编码方便测试; 真实场景可固定), 加载一次后不修改
+// AES-GCM: key 16 字节, NonceSize12 要求 iv 12 字节
+// 关键词: 只读常量, 并发安全
+AES_KEY = "aaaaaaaaaaaaaaaa"
+AES_IV = "aaaaaaaaaaaa"
+
+// --- 请求侧: 供 {{yak(...)}} fuzztag 调用的加密函数 (纯函数, 入参来自序列变量) ---
+// 用 AES-GCM 加密真实数据
+aesGCM = func(data) {
+    return codec.EncodeBase64(codec.AESGCMEncryptWithNonceSize12(AES_KEY, data, AES_IV)~)
+}
+// 用服务器公钥 RSA-OAEP 包裹 AES key
+rsaOAEP_key = func(pem) {
+    return codec.EncodeBase64(codec.RSAEncryptWithOAEP(pem, AES_KEY)~)
+}
+// 用服务器公钥 RSA-OAEP 包裹 AES iv
+rsaOAEP_iv = func(pem) {
+    return codec.EncodeBase64(codec.RSAEncryptWithOAEP(pem, AES_IV)~)
+}
+
+// --- 响应侧: 解密响应让用户看到明文, 并把结果提取成 Fuzzer 变量 ---
+// mirrorHTTPFlow(req, rsp, params) -> map; params 含序列里提取的 privateKey
+mirrorHTTPFlow = func(req, rsp, params) {
+    out = {}
+    body = poc.GetHTTPPacketBody(rsp)
+    if len(body) == 0 {
+        return out
+    }
+    obj = json.loads(string(body))
+    if obj == nil || obj["data"] == nil {
+        return out
+    }
+    pem = params["privateKey"]
+    // 用私钥 RSA-OAEP 解出响应里的 AES key/iv, 再 AES-GCM 解出明文
+    key = codec.RSADecryptWithOAEP(pem, codec.DecodeBase64(obj["encryptedKey"])~)~
+    iv = codec.RSADecryptWithOAEP(pem, codec.DecodeBase64(obj["encryptedIV"])~)~
+    plain = codec.AESGCMDecryptWithNonceSize12(key, codec.DecodeBase64(obj["data"])~, iv)~
+    out["plaintext"] = string(plain)
+    // 直接判定爆破是否成功, 供结果表一眼区分
+    if str.Contains(string(plain), `"success":true`) {
+        out["login"] = "SUCCESS"
+    }
+    return out
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+离线生成一对 RSA 密钥, 完整跑通"请求加密 -> 响应解密"两段
+*/
+func runSelfTest() {
+    log.info("start combo rsa-aesgcm hybrid self test")
+
+    // 服务器下发的密钥对 (Step[0] 提取得到 publicKey / privateKey)
+    pub, pri = tls.GenerateRSA2048KeyPair()~
+
+    // --- 请求侧自测: fuzztag 函数输出可被服务器(用私钥)还原 ---
+    encKey = rsaOAEP_key(pub)
+    backKey = codec.RSADecryptWithOAEP(pri, codec.DecodeBase64(encKey)~)~
+    assert string(backKey) == AES_KEY, "server should recover AES key via private key"
+    encData = aesGCM(`{"user":"admin"}`)
+    assert encData != "", "aesGCM fuzztag should produce ciphertext"
+    log.info("request-side encryption ok")
+
+    // --- 响应侧自测: 构造一个加密响应, mirrorHTTPFlow 解出明文 ---
+    rspKey = "bbbbbbbbbbbbbbbb"  // 服务器为响应自选的 AES key (16)
+    rspIv = "bbbbbbbbbbbb"       // 12 字节
+    rspPlain = `{"success":true,"username":"admin"}`
+    rspData = codec.EncodeBase64(codec.AESGCMEncryptWithNonceSize12(rspKey, rspPlain, rspIv)~)
+    rspEncKey = codec.EncodeBase64(codec.RSAEncryptWithOAEP(pub, rspKey)~)
+    rspEncIv = codec.EncodeBase64(codec.RSAEncryptWithOAEP(pub, rspIv)~)
+    rspBody = json.dumps({"data": rspData, "encryptedIV": rspEncIv, "encryptedKey": rspEncKey}, json.withIndent(""))
+    rsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + rspBody
+
+    result = mirrorHTTPFlow([]byte("POST /aes-gcm"), []byte(rsp), {"privateKey": pri})
+    log.info("decrypted plaintext: " + result["plaintext"])
+    assert result["plaintext"] == rspPlain, "mirrorHTTPFlow should decrypt response to plaintext"
+    assert result["login"] == "SUCCESS", "should flag successful login from decrypted body"
+
+    log.info("combo rsa-aesgcm hybrid self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

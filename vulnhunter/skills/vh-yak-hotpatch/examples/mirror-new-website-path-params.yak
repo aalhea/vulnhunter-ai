@@ -1,0 +1,49 @@
+/*
+示例: [全局] mirrorNewWebsitePathParams 全站可 Fuzz 端点清单
+关键词: 全局热加载, GlobalHotPatch, mirrorNewWebsitePathParams, 参数组合, 端点发现, 仅观察
+适用场景: 全局收集所有带参数的端点结构 (按参数名集合去重), 形成统一的可 Fuzz 端点清单
+参考: yak-project-public 009 全局热加载
+
+签名: mirrorNewWebsitePathParams(isHttps, url, req, rsp, body) (镜像类无 forward/drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+ENDPOINTS = make(map[string]bool)
+
+mirrorNewWebsitePathParams = func(isHttps, url, req, rsp, body) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    parts = str.SplitN(rest, "?", 2)
+    names = []
+    if len(parts) == 2 && parts[1] != "" {
+        for _, kv := range str.Split(parts[1], "&") {
+            names = append(names, str.SplitN(kv, "=", 2)[0])
+        }
+    }
+    key = sprintf("%s[%d params]", parts[0], len(names))
+    ENDPOINTS[key] = true
+    log.info("global fuzzable endpoint: %s", key)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mirror new website path params self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsitePathParams(false, "http://corp.local/search?q=a&page=1", req, rsp, []byte("ok"))
+    mirrorNewWebsitePathParams(false, "http://corp.local/item?id=1", req, rsp, []byte("ok"))
+
+    log.info(sprintf("endpoints: %d", len(ENDPOINTS)))
+    assert len(ENDPOINTS) == 2, "should collect 2 fuzzable endpoints"
+    assert ENDPOINTS["corp.local/search[2 params]"], "search endpoint should be recorded with 2 params"
+
+    log.info("global mirror new website path params self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

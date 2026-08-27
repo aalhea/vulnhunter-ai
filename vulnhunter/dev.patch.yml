@@ -1,0 +1,31 @@
+# Dev / live-test overlay: loads this package by path.
+#
+# 1) Point VULNHUNTER_ROOT at this repo and TOOLS_DIR at your binary tools
+#    directory (see scripts/start-web.ps1 for a one-command launcher):
+#      PowerShell: $env:VULNHUNTER_ROOT='C:/path/to/vulnhunter'; $env:TOOLS_DIR='C:/path/to/tools'
+#      Bash:       export VULNHUNTER_ROOT=/path/to/vulnhunter; export TOOLS_DIR=/path/to/tools
+# 2) From a DeepSeek Harness checkout with dependencies installed:
+#      pnpm dsh web --patch <this-repo>/dev.patch.yml
+#
+# Ships with the tool plugin + preset root only; uncomment the MCP bridges
+# once your Yakit / Chrome MCP endpoints are verified.
+
+- insert:
+    - id: vulnhunter-preset-root
+      name: !!js 'process.env.VULNHUNTER_ROOT + "/plugin/preset-root.js"'
+
+    - id: vulnhunter
+      name: !!js 'process.env.VULNHUNTER_ROOT + "/dist/index.js"'
+      config:
+        toolsDir: !!js 'process.env.TOOLS_DIR || ""'
+        artifactsRoot: !!js 'process.env.VULNHUNTER_ROOT + "/demo/artifacts"'
+        scopeFile: !!js 'process.env.VULNHUNTER_ROOT + "/demo/scope.yaml"'
+        defaultMode: ask
+
+# mcp-sse-bridge (uncomment once Yakit is running):
+# - id: mcp-yakit
+#   name: !!js 'process.env.VULNHUNTER_ROOT + "/dist/mcp-sse-bridge.js"'
+#   config:
+#     serverName: yakit
+#     url: 'http://127.0.0.1:11432/sse'
+#     failOnStartupError: false

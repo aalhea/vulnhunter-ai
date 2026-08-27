@@ -1,0 +1,90 @@
+/*
+组合示例: [前端加密对抗] 双重防护 = AES 加密 body + HMAC 签名防篡改
+关键词: 前端加密, 验签, HMAC-SHA256, AES-CBC, beforeRequest, afterRequest, 双重防护, 爆破
+适用场景: 系统同时上了两道防护 —— 请求 body 用 AES 加密, 再对(密文或明文)算 HMAC 签名放进 header;
+         改了数据不改签名会被服务端以"签名不一致"拒绝。本组合一次性接管"加密 + 签名", 让你照样爆破
+参考: yak-project-public 183 (验签/前端加密), 029/045 (国密双向认证同理)
+
+链路: beforeRequest -> 1) 对明文 body 算 HMAC 签名写入 X-Signature
+                     -> 2) 把 body 加密成密文出站
+      afterRequest  -> 解密响应让你看到明文结果
+
+!! 并发安全: KEY/SIGN_KEY/IV 全是只读常量, hook 内不写共享可变全局, 无竞争 !!
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 只读常量: 加密密钥 / 签名密钥 / IV (均为 HACK 出来的硬编码值, 加载一次后不再修改)
+// 关键词: 只读常量, 并发安全
+AES_KEY = codec.DecodeHex("31323334313233343132333431323334")~
+AES_IV = codec.DecodeHex("0e32a6c40da89058b6451c717d648cb7")~
+SIGN_KEY = "1234123412341234"
+SIGN_HEADER = "X-Signature"
+
+// 对明文 body 计算 HMAC-SHA256 签名 (纯函数)
+signBody = func(plainBody) {
+    return codec.EncodeToHex(codec.HmacSha256(SIGN_KEY, plainBody)~)
+}
+
+beforeRequest = func(https, originReq, req) {
+    body = poc.GetHTTPPacketBody(req)
+    if len(body) == 0 {
+        return req
+    }
+    // 1) 先对明文算签名写进 header (服务端用同一 KEY 验签)
+    out = poc.ReplaceHTTPPacketHeader(req, SIGN_HEADER, signBody(string(body)))
+    // 2) 再把 body 加密出站
+    cipher = codec.AESCBCEncryptWithPKCS7Padding(AES_KEY, body, AES_IV)~
+    return poc.ReplaceHTTPPacketBody(out, codec.EncodeBase64(cipher))
+}
+
+afterRequest = func(https, originReq, req, originRsp, rsp) {
+    body = poc.GetHTTPPacketBody(rsp)
+    if len(body) == 0 {
+        return rsp
+    }
+    raw, err = codec.DecodeBase64(string(body))
+    if err != nil {
+        return rsp
+    }
+    plain, err2 = codec.AESCBCDecryptWithPKCS7Padding(AES_KEY, raw, AES_IV)
+    if err2 != nil {
+        return rsp
+    }
+    return poc.ReplaceHTTPPacketBody(rsp, plain)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start combo sign-and-encrypt self test")
+
+    plainBody = `{"username":"admin","password":"123456"}`
+    plainReq = "POST /api/login HTTP/1.1\r\nHost: t.local\r\nContent-Type: application/json\r\n\r\n" + plainBody
+
+    out = beforeRequest(false, []byte(plainReq), []byte(plainReq))
+
+    // 验证签名头存在且等于对明文的 HMAC
+    sig = poc.GetHTTPPacketHeader(out, SIGN_HEADER)
+    log.info("signature header: " + sig)
+    assert sig == signBody(plainBody), "X-Signature should be HMAC of plaintext body"
+
+    // 验证 body 已被加密, 且能解回明文 (服务端视角)
+    encBody = string(poc.GetHTTPPacketBody(out))
+    assert encBody != plainBody, "body should be encrypted"
+    back = codec.AESCBCDecryptWithPKCS7Padding(AES_KEY, codec.DecodeBase64(encBody)~, AES_IV)~
+    assert string(back) == plainBody, "encrypted body must decrypt back to plaintext"
+
+    // afterRequest 解密响应让用户看明文
+    rspPlain = `{"success":true}`
+    encRsp = "HTTP/1.1 200 OK\r\n\r\n" + codec.EncodeBase64(codec.AESCBCEncryptWithPKCS7Padding(AES_KEY, rspPlain, AES_IV)~)
+    dec = afterRequest(false, []byte(plainReq), out, []byte(encRsp), []byte(encRsp))
+    assert string(poc.GetHTTPPacketBody(dec)) == rspPlain, "response should be decrypted for the user"
+
+    log.info("combo sign-and-encrypt self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

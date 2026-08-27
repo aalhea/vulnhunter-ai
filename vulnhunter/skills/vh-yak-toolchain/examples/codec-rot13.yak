@@ -1,0 +1,48 @@
+/*
+示例: codec 插件 (右键 codec) - ROT13 编解码
+关键词: codec 插件, handle, 右键菜单, yak codec-plugin, 自定义编码
+适用场景: 写一个右键 codec 插件, 在数据包/选中文本上做自定义编解码; 用 yak codec-plugin 命令验证
+
+契约:
+  - codec 插件必须定义 handle(input) 函数, 返回处理后的字符串
+  - Yakit 右键执行时把选中内容作为 input 传入, 展示 handle 的返回值
+  - 命令行验证: yak codec-plugin --script codec-rot13.yak --input "Hello"
+*/
+
+// ROT13: 字母表轮转 13 位, 自身可逆 (handle(handle(x)) == x)
+// 关键词: handle, ROT13, codec 插件入口
+handle = func(input) {
+    out = make([]byte, 0)
+    for ch in []byte(input) {
+        c = ch
+        if c >= 'a' && c <= 'z' {
+            c = 'a' + (c - 'a' + 13) % 26
+        } else if c >= 'A' && c <= 'Z' {
+            c = 'A' + (c - 'A' + 13) % 26
+        }
+        out = append(out, byte(c))
+    }
+    return string(out)
+}
+
+/*
+========== 自测块 ==========
+yak <file> 直接跑时验证 handle 的可逆性; Yakit 加载时只注册 handle
+*/
+func runSelfTest() {
+    log.info("start codec rot13 self test")
+
+    plain = "Hello, Yak-Skills 123!"
+    encoded = handle(plain)
+    log.info("encoded: " + encoded)
+
+    assert encoded == "Uryyb, Lnx-Fxvyyf 123!", f"unexpected rot13 output: ${encoded}"
+    // 数字与符号不变, ROT13 自反
+    assert handle(encoded) == plain, "rot13 should be reversible"
+
+    log.info("codec rot13 self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

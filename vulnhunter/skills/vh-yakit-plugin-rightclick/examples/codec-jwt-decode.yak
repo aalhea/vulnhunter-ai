@@ -1,0 +1,58 @@
+/*
+示例: 右键 codec 插件 - JWT 一键解码 (header + payload)
+关键词: codec 插件, handle, 右键菜单, JWT, Base64Url, 渗透常用
+适用场景: 抓到一个 JWT, 选中后右键 -> 插件扩展 -> 本插件, 直接看到 header 和 payload 明文 JSON
+验证: yak codec-plugin --script codec-jwt-decode.yak --input "eyJ...header.eyJ...payload.sig"
+
+契约: handle(input) 返回字符串, 即右键执行后展示在 "Codec结果" 里的内容
+*/
+
+// 解码 JWT 的一段 (base64url), 失败则原样返回, 保证 handle 不抛错
+// 关键词: codec.DecodeBase64Url, 容错
+decodeSegment = func(seg) {
+    raw, err = codec.DecodeBase64Url(seg)
+    if err != nil {
+        return "<decode failed: " + seg + ">"
+    }
+    return string(raw)
+}
+
+// codec 插件入口
+// 关键词: handle, JWT 三段拆解
+handle = func(input) {
+    token = str.TrimSpace(input)
+    parts = str.Split(token, ".")
+    if len(parts) < 2 {
+        return "not a valid JWT (expect at least header.payload)"
+    }
+    header = decodeSegment(parts[0])
+    payload = decodeSegment(parts[1])
+    return sprintf("[header]\n%s\n\n[payload]\n%s", header, payload)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start codec jwt decode self test")
+
+    // 构造一个 JWT: header={"alg":"HS256","typ":"JWT"} payload={"sub":"1","name":"admin"}
+    header = codec.EncodeBase64Url(`{"alg":"HS256","typ":"JWT"}`)
+    payload = codec.EncodeBase64Url(`{"sub":"1","name":"admin"}`)
+    jwt = header + "." + payload + ".fakesignature"
+
+    out = handle(jwt)
+    log.info("decoded jwt:\n" + out)
+    assert str.Contains(out, `"alg":"HS256"`), "header should be decoded"
+    assert str.Contains(out, `"name":"admin"`), "payload should be decoded"
+
+    // 非 JWT 输入有友好提示
+    bad = handle("just-a-string")
+    assert str.Contains(bad, "not a valid JWT"), "invalid jwt should be reported"
+
+    log.info("codec jwt decode self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

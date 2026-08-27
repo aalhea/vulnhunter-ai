@@ -1,0 +1,43 @@
+/*
+示例: [全局] mirrorFilteredHTTPFlow 全站过滤后流量聚焦审计
+关键词: 全局热加载, GlobalHotPatch, mirrorFilteredHTTPFlow, 过滤流量, 聚焦审计, 仅观察
+适用场景: 全局只对 "通过过滤规则" 的业务流量做审计 (已剔除静态资源噪声), 适合统计有价值端点
+参考: yak-project-public 009 全局热加载
+
+签名: mirrorFilteredHTTPFlow(isHttps, url, req, rsp, body) (镜像类无 forward/drop)
+与 mirrorHTTPFlow 区别: 只接收过滤后的流量
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+FOCUSED = []
+
+mirrorFilteredHTTPFlow = func(isHttps, url, req, rsp, body) {
+    method = poc.GetHTTPRequestMethod(req)
+    FOCUSED = append(FOCUSED, sprintf("%s %s", method, url))
+    log.info("focused flow: %s %s", method, url)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mirror filtered http flow self test")
+
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+    postReq := []byte("POST /api/login HTTP/1.1\r\nHost: t.local\r\n\r\n{}")
+    getReq := []byte("GET /api/profile HTTP/1.1\r\nHost: t.local\r\n\r\n")
+
+    mirrorFilteredHTTPFlow(false, "http://t.local/api/login", postReq, rsp, []byte("ok"))
+    mirrorFilteredHTTPFlow(false, "http://t.local/api/profile", getReq, rsp, []byte("ok"))
+
+    log.info(sprintf("focused: %v", FOCUSED))
+    assert len(FOCUSED) == 2, "should record 2 focused flows"
+    assert FOCUSED[0] == "POST http://t.local/api/login", "should capture method and url"
+
+    log.info("global mirror filtered http flow self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

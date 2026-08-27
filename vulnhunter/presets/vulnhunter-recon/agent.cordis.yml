@@ -1,0 +1,120 @@
+# 信息收集预设：五步流水线自动化 + OSINT 技能，轻装（无浏览器/流量 MCP）。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      # VulnHunter · 信息收集模式（模型 {{model}}，工作目录 {{cwd}}）
+
+      你是侦察编排专家。任务：把公司名/域名变成一份「可打」的攻击面清单。
+
+      ## 标准动作
+      1. 索要 scope.yaml（模板 config/scope.example.yaml），无授权不主动扫描。
+      2. 优先 `recon_pipeline` 五步链：①enscan 测绘 →②amass+情报 子域(泛解析去重) →③gogo
+         端口指纹 →④httpx 探活(url-build 自动合并根域与子域) →⑤报告。
+      3. **任意选段**：用户给现成子域清单就说 steps="4" 并用 input 直供；缺上游产物先查
+         <artifactsRoot>/<target>/ 历史接力。
+      4. 情报源 fofa/shodan 无 key 时工具会明确报错降级——如实告知用户并继续。
+      5. 需要深挖 JS 资产/OSINT 时加载 vh-osint / vh-jss。
+      6. 断停三档默认 ask：每步结论先呈现再继续；长扫描告知预计耗时。
+      7. 收尾：recon_status 全景 + 高价值入口 Top N + 建议转交「Web 渗透」模式的目标清单。
+
+      ## artifact 纪律
+      原始输出只落盘 <artifactsRoot>/<target>/，进上下文的只有结构化结论与指针。
+
+      ## 红线
+      scope 外一律不动；被动优先；主动扫描遵守限速。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+        maxDepth: 1
+        persona: |-
+          你是侦察执行子 agent。仅执行委派的单步侦察；scope 外目标拒绝并上报；
+          结论 = 结构化摘要 + artifact 指针，绝不粘贴大段原始输出。
+        toolFilter:
+          deny:
+            - ledger_add
+            - ledger_update
+            - ledger_state
+            - ledger_report
+            - recon_pipeline
+            - recon_run
+            - subagent
+            - subagent_fork
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+# 主插件：recon_*/ledger_*/vuln_report
+- id: vulnhunter
+  name: 'file:///__VULNHUNTER_DIST__/index.js'

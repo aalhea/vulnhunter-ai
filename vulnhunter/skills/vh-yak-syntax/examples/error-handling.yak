@@ -1,0 +1,79 @@
+/*
+示例: Yaklang 错误处理三板斧 (~ / if err / defer recover)
+关键词: Yaklang 错误处理, 波浪号, WavyCall, panic, recover, defer, try-catch, die
+适用场景: Yaklang 库函数普遍以最后一个返回值为 error; 掌握三种处理方式是写健壮脚本的基础
+参考: yaklang-ai-training-materials basic-syntax cap6-2-error-handling
+
+三种等价写法:
+  ret, err = f(arg); if err != nil { panic(err) }   // 手动判断
+  ret, err = f(arg); die(err)                        // die: err 非 nil 才 panic
+  ret = f(arg)~                                       // ~ 波浪号: 自动 panic
+*/
+
+// 方式一: if err != nil 手动判断 (最显式, 可自定义降级逻辑)
+// 关键词: if err, 手动错误处理, codec.DecodeBase64
+func testManualCheck() {
+    raw, err = codec.DecodeBase64("aGVsbG8=")  /* base64("hello") */
+    assert err == nil, "valid base64 should not error"
+    assert string(raw) == "hello", "decoded value"
+
+    _, err2 = codec.DecodeBase64("!!!not-base64!!!")
+    // 非法输入应返回 error, 此时可走降级而非崩溃
+    if err2 != nil {
+        log.info("got expected error on invalid base64, degrade gracefully")
+    }
+    log.info("manual check ok")
+}
+
+// 方式二: ~ 波浪号 (WavyCall), 出错即 panic, 适合"出错就该终止"的场景
+// 关键词: 波浪号, WavyCall, 自动 panic
+func testWavy() {
+    plain = codec.DecodeBase64("eWFr")~  /* base64("yak") */
+    assert string(plain) == "yak", "wavy call returns value on success"
+    log.info("wavy call ok")
+}
+
+// 方式三: defer + recover 捕获崩溃, 把 panic 转成可控流程
+// 关键词: defer, recover, panic, 崩溃捕获
+func safeDivide(a, b) {
+    // result 是 map (引用类型), 在内层函数里被 defer/recover 安全填充
+    // 把可能崩溃的逻辑放进内层 run(), recover 在 run() 内捕获,
+    // 这样外层 safeDivide 总能执行到 return result
+    result = {"ok": false, "value": 0, "err": ""}
+    run = func() {
+        defer func {
+            e = recover()
+            if e != nil {
+                result["err"] = sprintf("%v", e)
+            }
+        }
+        result["value"] = a / b  /* b == 0 时触发 runtime panic */
+        result["ok"] = true
+    }
+    run()
+    return result
+}
+
+func testRecover() {
+    good = safeDivide(10, 2)
+    assert good["ok"] && good["value"] == 5, "normal division should succeed"
+
+    bad = safeDivide(10, 0)
+    assert !bad["ok"], "divide by zero should be caught, not crash"
+    assert bad["err"] != "", "recover should capture the panic message"
+    log.info("caught panic: " + bad["err"])
+    log.info("recover ok")
+}
+
+func main() {
+    log.info("start yaklang error handling demo")
+    testManualCheck()
+    testWavy()
+    testRecover()
+    log.info("yaklang error handling self test passed")
+}
+
+// yak 不会自动调用 func main(), 需显式调用; 用 YAK_MAIN 守卫只在命令行运行
+if YAK_MAIN {
+    main()
+}

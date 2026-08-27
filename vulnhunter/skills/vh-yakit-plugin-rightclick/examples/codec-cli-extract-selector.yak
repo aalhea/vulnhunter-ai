@@ -1,0 +1,194 @@
+/*
+示例: 右键 codec 插件 + cli 参数(变种) - 让用户在表单里选"提取什么"
+关键词: codec 插件, cli 参数, History 右键, 下拉选择, cli.StringSlice, setSelectOption, db.SavePayload, db.YieldPayload
+适用场景: 在 codec-history-extract-paths 基础上加一个"提取项"下拉, 让用户自己选提取
+          Path / 参数名 / Cookie。codec 插件同样支持 cli 参数: 启用 History 右键时,
+          Yakit 会弹出参数表单(本例是个下拉框)让用户选择, 再把 flow id 作为 input 传进来。
+验证: yak codec-cli-extract-selector.yak                          # 自测三种提取模式
+      yak codec-cli-extract-selector.yak --real 1 --mode param    # 真实库: 提取参数名
+      yak codec-cli-extract-selector.yak --real 1 --mode cookie --save-dict
+
+契约要点(已核实):
+  - History 右键 codec 插件同时支持 input(=flow id) 与 cli 参数(params):
+    yakit 前端 onOpenFuzzerModal 同时携带 text=flow id 与 params(脚本里的 cli 定义),
+    带 params 时会先弹参数表单, 用户填完再执行 handle(input)。
+  - cli.StringSlice + setSelectOption + setMultipleSelect(false) => 单选下拉框。
+
+涉及的 db "Yield" 接口:
+  - db.QueryHTTPFlowsByID / db.QueryHTTPFlowsByKeyword  (通道, 底层 yakit.YieldHTTPFlows)
+  - db.SavePayload / db.YieldPayload                    (把提取结果沉淀为可复用字典)
+
+互链:
+  - 不带 cli 的基础版见同目录 codec-history-extract-paths.yak
+  - cli 参数体系见 skills/yakit-native-plugin/SKILL.md
+*/
+
+// ---- 顶层 cli: 提取项下拉 + 是否落字典(Yakit 据此渲染参数表单) ----
+// 关键词: cli.StringSlice, setSelectOption, 单选下拉
+MODE_SEL = cli.StringSlice("mode",
+    cli.setVerboseName("提取项"),
+    cli.setSelectOption("提取 Path", "path"),
+    cli.setSelectOption("提取 参数名", "param"),
+    cli.setSelectOption("提取 Cookie", "cookie"),
+    cli.setMultipleSelect(false),
+    cli.setDefault("path"),
+)
+// 关键词: cli.Bool, 是否把结果落为 Payload 字典
+SAVE_DICT = cli.Bool("save-dict", cli.setVerboseName("结果落字典"))
+cli.check()
+
+MODE = "path"
+if len(MODE_SEL) > 0 { MODE = MODE_SEL[0] }
+
+// ---- 纯函数(可自测) ----
+// 关键词: flow id 解析
+parseIds = func(input) {
+    ids = []
+    for part in str.Split(input, ",") {
+        p = str.TrimSpace(part)
+        if p == "" { continue }
+        n, err = atoi(p)
+        if err != nil { continue }
+        if n > 0 { ids = append(ids, int64(n)) }
+    }
+    return ids
+}
+
+// 关键词: host 提取
+hostOf = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    return str.SplitN(rest, "/", 2)[0]
+}
+
+// 关键词: path 归一化(去 query)
+pathOf = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    idx = str.Index(rest, "/")
+    if idx < 0 { return "/" }
+    return str.SplitN(rest[idx:], "?", 2)[0]
+}
+
+// 关键词: 按模式提取, 去重; mode in {path, param, cookie}
+// pairs: [{url, req([]byte)}]
+extractByMode = func(pairs, mode) {
+    seen = {}
+    out = []
+    push = func(v) {
+        if v == "" { return }
+        if v in seen { return }
+        seen[v] = true
+        out = append(out, v)
+    }
+    for p in pairs {
+        if mode == "path" {
+            push(pathOf(p.url))
+        } else if mode == "param" {
+            for name in poc.GetAllHTTPPacketQueryParams(p.req) { push(name) }
+        } else if mode == "cookie" {
+            push(poc.GetHTTPPacketHeader(p.req, "Cookie"))
+        }
+    }
+    return out
+}
+
+// ---- 生产入口 ----
+// 关键词: handle, codec 插件入口, flow id + cli mode
+handle = func(input) {
+    ids = parseIds(input)
+    if len(ids) == 0 { return "no valid flow id in input: " + input }
+
+    // flow id -> host(去重)
+    hostSeen = {}
+    hosts = []
+    for flow in db.QueryHTTPFlowsByID(ids...) {
+        h = hostOf(flow.Url)
+        if h != "" && !(h in hostSeen) { hostSeen[h] = true; hosts = append(hosts, h) }
+    }
+    if len(hosts) == 0 { return "no flow found for ids: " + input }
+
+    // 逐 host 捞流量, 按用户选择的 mode 提取, 带进度条
+    all = []
+    total = len(hosts)
+    done = 0
+    for host in hosts {
+        yakit.SetProgress(float(done) / float(total))
+        pairs = []
+        for f in db.QueryHTTPFlowsByKeyword(host) {
+            req = codec.StrconvUnquote(f.Request)~
+            pairs = append(pairs, {"url": f.Url, "req": []byte(req)})
+        }
+        for v in extractByMode(pairs, MODE) { all = append(all, v) }
+        done++
+    }
+    yakit.SetProgress(1.0)
+
+    // 可选: 落为 Payload 字典(持久, 可在 Web Fuzzer/扫描器复用)
+    if SAVE_DICT && len(all) > 0 {
+        group = sprintf("extract-%s", MODE)
+        db.SavePayload(group, all)~
+        log.info("saved %d items into payload group: %s", len(all), group)
+    }
+
+    return sprintf("mode=%s, host=%d, items=%d\n%s", MODE, len(hosts), len(all), str.Join(all, "\n"))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+默认验证 extractByMode 三种模式纯逻辑 + Payload 字典 roundtrip; --real <id> 跑真实链路
+*/
+func runSelfTest() {
+    log.info("start codec-cli-extract-selector self test")
+
+    mkReq = func(target, cookie) {
+        base = "GET " + target + " HTTP/1.1\r\nHost: shop.example.com\r\n"
+        if cookie != "" { base += "Cookie: " + cookie + "\r\n" }
+        return []byte(base + "\r\n")
+    }
+    pairs = [
+        {"url": "https://shop.example.com/api/order/list?page=1", "req": mkReq("/api/order/list?page=1", "SESSION=abc")},
+        {"url": "https://shop.example.com/api/order/list?page=2", "req": mkReq("/api/order/list?page=2", "SESSION=abc")},
+        {"url": "https://shop.example.com/api/user/profile?id=7", "req": mkReq("/api/user/profile?id=7", "")},
+    ]
+
+    // path: order/list 去重 -> 2
+    paths = extractByMode(pairs, "path")
+    assert len(paths) == 2, f"path mode -> 2, got ${len(paths)}"
+    // param: page + id
+    params = extractByMode(pairs, "param")
+    assert "page" in params && "id" in params, "param mode collects page & id"
+    // cookie: 去重 -> 1
+    cookies = extractByMode(pairs, "cookie")
+    assert len(cookies) == 1 && cookies[0] == "SESSION=abc", "cookie mode dedup -> SESSION=abc"
+
+    // Payload 字典 roundtrip: SavePayload -> YieldPayload
+    grp = "selftest-extract-" + str.RandStr(6)
+    db.SavePayload(grp, paths)~
+    back = []
+    for p in db.YieldPayload(grp) { back = append(back, p) }
+    log.info(sprintf("payload roundtrip: %v", back))
+    assert len(back) == 2, f"yield should return 2 payloads, got ${len(back)}"
+    db.DeletePayloadByGroup(grp)   // 清理, 避免污染 profile 库
+
+    log.info("codec-cli-extract-selector self test passed")
+}
+
+func runReal() {
+    args = cli.Args()
+    id = "1"
+    n = len(args)
+    i = 0
+    for i < n {
+        if args[i] == "--real" && i+1 < n { id = args[i+1] }
+        i++
+    }
+    log.info("run real handle: id=%s mode=%s save-dict=%v", id, MODE, SAVE_DICT)
+    log.info("result:\n" + handle(id))
+}
+
+if YAK_MAIN {
+    if "--real" in cli.Args() {
+        runReal()
+    } else {
+        runSelfTest()
+    }
+}

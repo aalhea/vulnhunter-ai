@@ -1,0 +1,4 @@
+PyYAML
+termcolor
+psutil
+tldextract

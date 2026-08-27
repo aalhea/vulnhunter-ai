@@ -1,0 +1,50 @@
+/*
+示例: [响应] customFailureChecker 业务层失败判定
+关键词: customFailureChecker, Web Fuzzer 热加载, 业务失败, 爆破筛选, 200 OK 假成功
+适用场景: 身份认证爆破时服务器对所有失败都返回 200 OK, 真正失败信息藏在 body 里; 用关键词判定把"协议成功业务失败"的请求标记为失败
+参考: yak-project-public 043 (2025-07-25) Web Fuzzer 新的热加载函数
+
+签名: customFailureChecker(https, req, rsp, fail)
+  - 调用 fail("原因字符串") 即把该请求标记为失败; 不调用则视为成功
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+ERROR_KEYWORDS = ["密码错误", "Login Failed", "Invalid credentials", "用户不存在", "username or password is not exists"]
+
+customFailureChecker = func(https, req, rsp, fail) {
+    body = string(poc.GetHTTPPacketBody(rsp))
+    if str.StringContainsAnyOfSubString(body, ERROR_KEYWORDS) {
+        fail("business failure: login error keyword matched")
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start custom failure checker self test")
+
+    captured = {"reason": "", "failed": false}
+    fail = func(reason) { captured["reason"] = reason; captured["failed"] = true }
+
+    req := []byte("POST /login HTTP/1.1\r\nHost: t.local\r\n\r\nuser=a&pass=b")
+
+    // 假成功: 200 但 body 含失败关键词
+    failRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"msg\":\"Invalid credentials\"}")
+    customFailureChecker(false, req, failRsp, fail)
+    assert captured["failed"], "200 with error keyword should be marked failed"
+    log.info("marked failed, reason: " + captured["reason"])
+
+    // 真成功: 没有失败关键词
+    captured["failed"] = false; captured["reason"] = ""
+    okRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"token\":\"abc\",\"msg\":\"welcome\"}")
+    customFailureChecker(false, req, okRsp, fail)
+    assert !captured["failed"], "real success should not be marked failed"
+
+    log.info("custom failure checker self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

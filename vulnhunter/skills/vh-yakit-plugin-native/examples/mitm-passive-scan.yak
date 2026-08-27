@@ -1,0 +1,94 @@
+/*
+示例: Yakit MITM 原生插件 - 被动扫描复杂内容(敏感信息泄露)
+关键词: mitm 原生插件, 被动扫描, mirrorNewWebsitePathParams, risk.NewRisk, 敏感信息泄露
+适用场景: 把插件类型设为 mitm 并启用后, 浏览器经过代理的每个新参数组合的响应都会被
+          自动喂给本插件做被动扫描。这里检测响应体里的手机号/身份证/JWT/AKSK 等敏感信息,
+          命中即产出一条 risk(漏洞/风险), 在 Yakit 风险与漏洞面板可见。
+验证: yak mitm-passive-scan.yak   (自测只校验纯扫描函数, 不写库)
+
+为什么用 mirrorNewWebsitePathParams:
+  - 它按"路径+参数结构"去重, 同一接口反复访问只触发一次, 适合被动扫描省算力。
+  - mirror 系列是只读观察 hook, 不影响流量转发, 天然适合"边代理边扫"。
+
+互链:
+  - MITM 全部 hook 与去重语义见 skills/mitm-hotpatch/SKILL.md
+  - 原生插件与热加载的区别见 skills/yakit-native-plugin/SKILL.md
+*/
+
+// 敏感信息规则表(只读常量, 加载时定义一次; 切勿在并发 hook 内修改全局)
+// 关键词: 敏感信息规则, 正则
+SENSITIVE_RULES = [
+    {"type": "phone", "pattern": `1[3-9]\d{9}`},
+    {"type": "id-card", "pattern": `\d{17}[\dXx]`},
+    {"type": "jwt", "pattern": `eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}`},
+    {"type": "aksk", "pattern": `AKIA[0-9A-Z]{16}`},
+]
+
+// 纯函数: 扫描一段文本, 返回命中的 [{type, value}] 列表
+// 关键词: 被动扫描核心, re.FindAll
+scanSensitive = func(content) {
+    findings = []
+    for rule in SENSITIVE_RULES {
+        for hit in re.FindAll(content, rule.pattern) {
+            findings = append(findings, {"type": rule.type, "value": hit})
+        }
+    }
+    return findings
+}
+
+// MITM 被动扫描 hook: 每个新参数组合的流量响应触发一次
+// 关键词: mirrorNewWebsitePathParams, 被动扫描入口
+mirrorNewWebsitePathParams = func(isHttps, url, req, rsp, body) {
+    // body 是响应体; 也可对 req 做扫描
+    findings = scanSensitive(string(body))
+    for f in findings {
+        // 命中即产出一条 risk; 真实运行写入 Yakit 风险面板
+        // 关键词: risk.NewRisk, 风险入库
+        risk.NewRisk(url,
+            risk.title(sprintf("sensitive info leak: %s", f.type)),
+            risk.type("info-leak"),
+            risk.severity("low"),
+            risk.payload(f.value),
+            risk.description("passively detected sensitive content in response body"),
+        )
+        log.info(sprintf("found %s in %s", f.type, url))
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+只验证 scanSensitive 纯逻辑, 不调用 risk(避免自测写库)
+*/
+func runSelfTest() {
+    log.info("start mitm-passive-scan self test")
+
+    sample = `{
+        "user":"alice",
+        "mobile":"13800138000",
+        "idNo":"11010119900307123X",
+        "token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
+        "ak":"AKIAIOSFODNN7EXAMPLE",
+        "note":"normal text no secret"
+    }`
+
+    findings = scanSensitive(sample)
+    types = []
+    for f in findings {
+        types = append(types, f.type)
+        log.info(sprintf("hit %s = %s", f.type, f.value))
+    }
+
+    assert "phone" in types, "should detect phone"
+    assert "id-card" in types, "should detect id-card"
+    assert "jwt" in types, "should detect jwt"
+    assert "aksk" in types, "should detect aksk"
+
+    // 无敏感内容应零命中
+    assert len(scanSensitive("just a plain sentence")) == 0, "clean text should yield no finding"
+
+    log.info("mitm-passive-scan self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+lib/
+*.log
+
+# 会话工作产物（账本/artifact/报告按目标目录存放，不入库）
+target*/
+artifacts/
+smoke/
+.smoke-tmp/
+
+# 记忆系统运行时数据
+memory/*.json
+memory/*.db
+memory/data/

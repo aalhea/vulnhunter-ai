@@ -1,0 +1,52 @@
+/*
+示例: [全局管线] beforeRequest 出站前最后改写请求
+关键词: beforeRequest, MITM 热加载, 返回值提交, 请求出站前, Trace 注入
+适用场景: 在请求真正出站的最后时刻统一注入追踪头/时间戳, 此 hook 在 hijackHTTPRequest 之后执行
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 beforeRequest/afterRequest
+
+签名: beforeRequest(isHttps, oreq, req)
+  - oreq: 原始请求; req: 经 hijackHTTPRequest 改写后的请求
+  - 关键区别: beforeRequest 用 return req 提交修改 (不是 forward), 返回 nil/不返回则用原 req
+  - 执行顺序: hijackHTTPRequest(可改写/丢弃) -> beforeRequest(出站前最后一刻)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 给每个出站请求注入统一追踪头, 已存在则不覆盖
+// 关键词: poc.GetHTTPPacketHeader, poc.AppendHTTPPacketHeader, codec.EncodeToHex
+TRACE_HEADER = "X-Yak-Trace-Id"
+
+beforeRequest = func(isHttps, oreq, req) {
+    if poc.GetHTTPPacketHeader(req, TRACE_HEADER) != "" {
+        return req
+    }
+    traceId = codec.EncodeToHex(codec.Sha256(sprintf("%s|%v", string(req), time.Now().UnixNano())))[0:16]
+    return poc.AppendHTTPPacketHeader(req, TRACE_HEADER, traceId)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start before request trace self test")
+
+    oreq := []byte("GET /api/data HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    req := []byte("GET /api/data HTTP/1.1\r\nHost: target.local\r\n\r\n")
+
+    out = beforeRequest(false, oreq, req)
+    traceId = poc.GetHTTPPacketHeader(out, TRACE_HEADER)
+    log.info("injected trace id: " + traceId)
+    assert traceId != "", "trace id header should be injected"
+    assert len(traceId) == 16, "trace id should be 16 hex chars"
+
+    // 已有 trace 头则不重复注入
+    withTrace = poc.AppendHTTPPacketHeader(req, TRACE_HEADER, "preset-123")
+    out2 = beforeRequest(false, oreq, withTrace)
+    assert poc.GetHTTPPacketHeader(out2, TRACE_HEADER) == "preset-123", "existing trace id should be preserved"
+
+    log.info("before request trace self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

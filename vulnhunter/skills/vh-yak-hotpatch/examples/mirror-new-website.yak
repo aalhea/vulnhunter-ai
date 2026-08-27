@@ -1,0 +1,42 @@
+/*
+示例: [全局] mirrorNewWebsite 全站资产清单
+关键词: 全局热加载, GlobalHotPatch, mirrorNewWebsite, 资产发现, 每域名一次, 仅观察
+适用场景: 全局收集所有经过 MITM/Fuzzer 的新域名, 形成统一资产清单 (每个新站点只回调一次)
+参考: yak-project-public 009 全局热加载
+
+签名: mirrorNewWebsite(isHttps, url, req, rsp, body) (镜像类无 forward/drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+ASSETS = []
+
+mirrorNewWebsite = func(isHttps, url, req, rsp, body) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    host = str.SplitN(rest, "/", 2)[0]
+    ASSETS = append(ASSETS, host)
+    log.info("global asset discovered: %s", host)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mirror new website self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsite(false, "http://a.corp.local/", req, rsp, []byte("ok"))
+    mirrorNewWebsite(true, "https://b.corp.local/login", req, rsp, []byte("ok"))
+
+    log.info(sprintf("assets: %v", ASSETS))
+    assert len(ASSETS) == 2, "should collect 2 assets"
+    assert ASSETS[0] == "a.corp.local", "first asset host should match"
+
+    log.info("global mirror new website self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

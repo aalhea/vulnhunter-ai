@@ -1,0 +1,136 @@
+/* PagesHost — 全屏页面容器 */
+
+@keyframes vh-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.host {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  /* 夜空氛围：顶部青紫双色氛围光 */
+  background:
+    radial-gradient(90% 60% at 50% -10%, rgba(0, 245, 212, 0.05) 0%, transparent 60%),
+    radial-gradient(70% 50% at 85% -5%, rgba(155, 93, 229, 0.06) 0%, transparent 55%),
+    var(--vh-page-bg);
+  animation: vh-page-in 320ms var(--vh-ease-out) both;
+}
+
+:global(body:not([data-ds-dark-theme])) .host {
+  background: var(--vh-page-bg);
+}
+
+/* 顶部：页面标签 + 关闭 */
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--vh-border);
+  background: var(--vh-surface);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 180ms var(--vh-ease),
+    background 180ms var(--vh-ease),
+    border-color 180ms var(--vh-ease),
+    box-shadow 180ms var(--vh-ease);
+}
+
+.tab:hover {
+  color: var(--vh-text-1);
+  background: var(--vh-hover);
+}
+
+.tabActive {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  box-shadow: var(--vh-accent-glow);
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--vh-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 180ms var(--vh-ease),
+    background 180ms var(--vh-ease),
+    border-color 180ms var(--vh-ease),
+    transform 180ms var(--vh-ease);
+}
+
+.close:hover {
+  color: var(--vh-text-1);
+  background: var(--vh-hover);
+  border-color: var(--vh-border-strong);
+}
+
+.close:active {
+  transform: scale(0.94);
+}
+
+/* 内容区 */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+
+.pageIn {
+  max-width: 1080px;
+  margin: 0 auto;
+  animation: vh-page-in 300ms var(--vh-ease-out) both;
+}
+
+/* 滚动条 */
+.body::-webkit-scrollbar { width: 6px; }
+.body::-webkit-scrollbar-thumb {
+  background: var(--vh-border-strong);
+  border-radius: 3px;
+}
+.body::-webkit-scrollbar-track { background: transparent; }
+
+/* 减小动画 */
+@media (prefers-reduced-motion: reduce) {
+  .host,
+  .pageIn {
+    animation: none;
+  }
+}

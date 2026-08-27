@@ -1,0 +1,65 @@
+/*
+示例: [签名] beforeRequest 注入 timestamp + nonce + HMAC 签名
+关键词: beforeRequest, Web Fuzzer 热加载, 接口签名, HMAC-SHA256, timestamp, nonce, 防篡改
+适用场景: 接口要求每个请求带 X-Timestamp / X-Nonce / X-Sign 三件套, 否则 4xx; 用热加载在发包前自动计算并注入, 让 Fuzzer 正常 fuzz 业务参数
+参考: yak-project-public 009 (2026-03-18) 全局热加载自动接管签名流程; 043 热加载函数
+
+签名规则 (演示): sign = HMAC-SHA256(SECRET, method + "\n" + path + "\n" + timestamp + "\n" + nonce) 的 hex
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+SIGN_SECRET = "demo-app-secret"
+
+// 从请求行提取 path (去掉 query)
+// 关键词: poc.GetHTTPRequestPath
+getPath = func(req) {
+    p = poc.GetHTTPRequestPath(req)
+    return str.SplitN(p, "?", 2)[0]
+}
+
+computeSign = func(method, path, ts, nonce) {
+    raw = method + "\n" + path + "\n" + ts + "\n" + nonce
+    return codec.EncodeToHex(codec.HmacSha256(SIGN_SECRET, raw))
+}
+
+beforeRequest = func(https, originReq, req) {
+    method = poc.GetHTTPRequestMethod(req)
+    path = getPath(req)
+    ts = sprintf("%d", time.Now().Unix())
+    nonce = codec.Md5(sprintf("%d", time.Now().UnixNano()))[:16]
+    sign = computeSign(method, path, ts, nonce)
+    req = poc.ReplaceHTTPPacketHeader(req, "X-Timestamp", ts)
+    req = poc.ReplaceHTTPPacketHeader(req, "X-Nonce", nonce)
+    req = poc.ReplaceHTTPPacketHeader(req, "X-Sign", sign)
+    return req
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start sign hmac before request self test")
+
+    mockReq = "GET /api/user/info?id=1 HTTP/1.1\r\nHost: api.local\r\n\r\n"
+    signed = beforeRequest(true, []byte(mockReq), []byte(mockReq))
+
+    ts = poc.GetHTTPPacketHeader(signed, "X-Timestamp")
+    nonce = poc.GetHTTPPacketHeader(signed, "X-Nonce")
+    sign = poc.GetHTTPPacketHeader(signed, "X-Sign")
+    log.info(sprintf("ts=%s nonce=%s sign=%s", ts, nonce, sign))
+
+    assert ts != "", "X-Timestamp should be injected"
+    assert nonce != "", "X-Nonce should be injected"
+    assert sign != "", "X-Sign should be injected"
+
+    // 重新独立计算签名, 验证与注入值一致 (path 去掉 query)
+    expect = computeSign("GET", "/api/user/info", ts, nonce)
+    assert sign == expect, "sign should be reproducible and match"
+
+    log.info("sign hmac before request self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

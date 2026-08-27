@@ -1,0 +1,68 @@
+/*
+示例: db 库 - 键值存储 (KV) 与 Payload 字典管理
+关键词: db.SetKey, db.GetKey, db.DelKey, db.SetKeyWithTTL, db.SavePayload, db.YieldPayload, db.DeletePayloadByGroup
+适用场景: 插件/脚本之间共享配置与中间状态 (KV), 以及把爆破字典存入 Yakit 统一管理 (Payload)
+参考: yaklang-ai-training-materials library-usage/db/db-practice.yak
+
+注意: db.SetKey / db.SavePayload 写入的是 Yakit profile 数据库 (持久化),
+      自测用唯一前缀的 key/group, 并在结束时清理, 避免污染
+*/
+
+// 键值存储
+// 关键词: db.SetKey, db.GetKey, db.DelKey
+func testKeyValue() {
+    log.info("test key-value storage")
+    key = "yak-skills-demo-key"
+    db.SetKey(key, "hello-kv")
+    assert db.GetKey(key) == "hello-kv", "GetKey should return the stored value"
+
+    // 覆盖写
+    db.SetKey(key, "updated")
+    assert db.GetKey(key) == "updated", "SetKey should overwrite"
+
+    // 删除
+    db.DelKey(key)
+    assert db.GetKey(key) == "", "after DelKey, GetKey should be empty"
+    log.info("key-value ok")
+}
+
+// Payload 字典管理
+// 关键词: db.SavePayload, db.YieldPayload, db.DeletePayloadByGroup
+func testPayload() {
+    log.info("test payload management")
+    group = "yak-skills-demo-users"
+    db.DeletePayloadByGroup(group)  /* 先清理, 保证可重复运行 */
+
+    usernames = ["admin", "root", "guest", "test"]
+    db.SavePayload(group, usernames)~
+
+    // YieldPayload 是迭代器, 逐条产出 payload 内容字符串
+    got = []
+    for p in db.YieldPayload(group) {
+        got = append(got, p)
+    }
+    log.info(sprintf("yielded %d payloads from group %s", len(got), group))
+    assert len(got) == 4, f"should yield 4 payloads, got ${len(got)}"
+    assert "admin" in got, "admin should be in payloads"
+
+    // 清理
+    db.DeletePayloadByGroup(group)
+    remain = []
+    for p in db.YieldPayload(group) {
+        remain = append(remain, p)
+    }
+    assert len(remain) == 0, "group should be empty after delete"
+    log.info("payload ok")
+}
+
+func main() {
+    log.info("start db kv and payload demo")
+    testKeyValue()
+    testPayload()
+    log.info("db kv and payload self test passed")
+}
+
+// yak 不会自动调用 func main(), 需显式调用; 用 YAK_MAIN 守卫只在命令行运行
+if YAK_MAIN {
+    main()
+}

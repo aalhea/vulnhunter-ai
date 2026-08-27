@@ -1,0 +1,40 @@
+/*
+示例: [全局] hijackHTTPRequest 给所有出站请求盖全局标记
+关键词: 全局热加载, GlobalHotPatch, hijackHTTPRequest, 全局标记, forward, 执行顺序
+适用场景: 一处配置, MITM 与所有 Fuzzer Tab 共享; 全局 hook 先于模块 hook 执行, 适合统一打标/灰度
+参考: yak-project-public 009 全局热加载; yakit 全局热加载默认模板
+
+全局与 MITM 共用同一套 hook 与签名 (见 mitm-hotpatch), 区别只在: 全局先执行, 跨 MITM+Fuzzer 生效
+签名: hijackHTTPRequest(isHttps, url, req, forward, drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+GLOBAL_HEADER = "X-Yakit-Global-HotPatch"
+
+hijackHTTPRequest = func(isHttps, url, req, forward, drop) {
+    // 证明全局 hook 命中了每一个请求; 模块 hook 之后还能继续改
+    forward(poc.ReplaceHTTPPacketHeader(req, GLOBAL_HEADER, "1"))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global hijack request mark self test")
+
+    captured = {"req": []byte("")}
+    forward = func(b) { captured["req"] = b }
+    drop = func() { log.error("should not drop") }
+
+    req := []byte("GET /any HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    hijackHTTPRequest(false, "http://target.local/any", req, forward, drop)
+    assert poc.GetHTTPPacketHeader(captured["req"], GLOBAL_HEADER) == "1", "every request should carry global marker"
+    log.info("global marker injected on request")
+
+    log.info("global hijack request mark self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

@@ -1,0 +1,76 @@
+/*
+示例: [重试] retryHandler 按状态码智能重试
+关键词: retryHandler, Web Fuzzer 热加载, 重试控制, 405, 429, 限流退避, ReplaceHTTPPacketMethod
+适用场景: 初次请求失败时, 根据响应状态码自动调整下一次重试行为 (改方法/退避/放弃)
+参考: yak-project-public 043 (2025-07-25) Web Fuzzer 新的热加载函数
+
+签名: retryHandler(https, retryCount, req, rsp, retry)
+  - https:      是否 HTTPS
+  - retryCount: 已重试次数
+  - req:        原始请求包
+  - rsp:        上一次失败的响应包
+  - retry(...): 触发重试, 可传入新请求包替代原包; 不调用则不再重试
+需配合 yakit Fuzzer 重试配置 (开启重试 + 指定失败状态码) 使用
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+retryHandler = func(https, retryCount, req, rsp, retry) {
+    statusCode = poc.GetStatusCodeFromResponse(rsp)
+    if statusCode == 405 {
+        log.info(sprintf("retry: 405 -> switch to POST (count=%d)", retryCount))
+        retry(poc.ReplaceHTTPPacketMethod(req, "POST"))
+        return
+    }
+    if statusCode == 429 {
+        log.info(sprintf("retry: 429 rate limited, backoff 1s (count=%d)", retryCount))
+        sleep(1)
+        retry()
+        return
+    }
+    if statusCode == 401 || statusCode == 403 {
+        log.info(sprintf("retry: %d denied, give up", statusCode))
+        return
+    }
+    if statusCode >= 500 {
+        log.info(sprintf("retry: %d server error, retry once (count=%d)", statusCode, retryCount))
+        retry()
+        return
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start retry status aware self test")
+
+    stat = {"called": 0, "lastReq": ""}
+    retryCb = func(args...) {
+        stat["called"] = stat["called"] + 1
+        if len(args) > 0 { stat["lastReq"] = string(args[0]) } else { stat["lastReq"] = "" }
+    }
+    origReq = "GET /api/data HTTP/1.1\r\nHost: test.local\r\n\r\n"
+
+    // 405 -> POST
+    stat["called"] = 0; stat["lastReq"] = ""
+    retryHandler(false, 1, []byte(origReq), []byte("HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"), retryCb)
+    assert stat["called"] == 1, "405 should trigger retry"
+    assert str.HasPrefix(stat["lastReq"], "POST "), "405 should switch to POST"
+
+    // 401 -> give up
+    stat["called"] = 0
+    retryHandler(false, 1, []byte(origReq), []byte("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"), retryCb)
+    assert stat["called"] == 0, "401 should not retry"
+
+    // 500 -> retry once with original
+    stat["called"] = 0
+    retryHandler(false, 1, []byte(origReq), []byte("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"), retryCb)
+    assert stat["called"] == 1, "500 should retry once"
+
+    log.info("retry status aware self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

@@ -1,0 +1,15 @@
+# Example wiring for the VulnHunter Web UI plugin.
+#
+# Append the block below to the browser-plugin roster in YOUR DeepSeek
+# Harness checkout: packages/bundle/web-app/cordis.patch.yml (inside the
+# `- insert:` list that holds `ui-vulnhunter`'s sibling ui-* rows).
+# Replace the two absolute paths with your own.
+#
+# vulnhunter-ui must be built first:
+#   cd vulnhunter-ui && npm install && npm run build
+#
+    - id: ui-vulnhunter
+      name: 'file:///C:/absolute/path/to/vulnhunter-ui/lib/index.js'
+      config:
+        vulnhunterRoot: 'C:/absolute/path/to/vulnhunter'
+        toolsRoot: 'C:/absolute/path/to/your/tools'

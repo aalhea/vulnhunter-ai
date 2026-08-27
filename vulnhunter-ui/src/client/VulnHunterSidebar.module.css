@@ -1,0 +1,372 @@
+/* VulnHunterSidebar — 导航式侧边栏 */
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * VulnHunter 全局语义令牌（body 级注入，插件全部组件共享）。
+ * 深色为默认值；浅色通过 body:not([data-ds-dark-theme]) 覆盖
+ * （data-ds-dark-theme 由 ui-layout 的 ThemePresenter 依据 ctx.theme 写入）。
+ * ─────────────────────────────────────────────────────────────────────── */
+:global(body) {
+  --vh-cyan: #00f5d4;
+  --vh-blue: #00bbf9;
+  --vh-purple: #9b5de5;
+  --vh-magenta: #f15bb5;
+  /* 品牌渐变（深色下加紫尾更炫） */
+  --vh-brand-grad: linear-gradient(120deg, #00f5d4 0%, #00bbf9 45%, #9b5de5 100%);
+  /* 运动 */
+  --vh-ease: cubic-bezier(.22, .61, .36, 1);
+  --vh-ease-out: cubic-bezier(.16, 1, .3, 1);
+  --vh-ease-spring: cubic-bezier(.34, 1.35, .5, 1);
+  --vh-dur-fast: 140ms;
+  --vh-dur: 220ms;
+  --vh-dur-slow: 380ms;
+  /* 表面：更深邃的夜空底 */
+  --vh-surface: rgba(8, 11, 21, 0.92);
+  --vh-page-bg: #070a14;
+  --vh-panel: rgba(99, 132, 255, 0.055);
+  --vh-panel-raised: rgba(99, 132, 255, 0.10);
+  --vh-input: rgba(3, 6, 18, 0.55);
+  --vh-code: rgba(3, 6, 18, 0.50);
+  /* 描边 */
+  --vh-border: rgba(120, 140, 255, 0.13);
+  --vh-border-strong: rgba(120, 140, 255, 0.26);
+  --vh-divider: rgba(120, 140, 255, 0.09);
+  /* 文本 */
+  --vh-text-1: #eaf0ff;
+  --vh-text-2: rgba(190, 205, 240, 0.74);
+  --vh-text-3: rgba(140, 160, 200, 0.62);
+  /* 交互 */
+  --vh-hover: rgba(99, 132, 255, 0.10);
+  --vh-idle-dot: rgba(140, 160, 200, 0.30);
+  /* 强调（青绿→蓝 双色渐变强调） */
+  --vh-accent-text: #33f0d2;
+  --vh-accent-bg: rgba(0, 245, 212, 0.10);
+  --vh-accent-bg-hover: rgba(0, 245, 212, 0.17);
+  --vh-accent-border: rgba(51, 240, 210, 0.34);
+  --vh-accent-ring: rgba(51, 240, 210, 0.38);
+  --vh-accent-glow: 0 0 12px rgba(0, 245, 212, 0.22), 0 0 28px rgba(0, 187, 249, 0.10);
+  --vh-glow-sm: 0 0 18px rgba(0, 245, 212, 0.14), 0 0 40px rgba(155, 93, 229, 0.10);
+  /* 状态色 */
+  --vh-ok: #2dd4bf;
+  --vh-warn: #f59e0b;
+  --vh-bad: #f87171;
+  --vh-ok-border: rgba(45, 212, 191, 0.26);
+  --vh-warn-border: rgba(245, 158, 11, 0.36);
+  --vh-warn-glow-weak: rgba(245, 158, 11, 0.4);
+  --vh-warn-glow-strong: rgba(245, 158, 11, 0.55);
+  --vh-bad-border: rgba(248, 113, 113, 0.32);
+  /* 流水线连线 / 编号座 */
+  --vh-line: linear-gradient(180deg, rgba(51, 240, 210, 0.42), rgba(155, 93, 229, 0.22));
+  --vh-order-bg: linear-gradient(135deg, rgba(0, 245, 212, 0.34), rgba(155, 93, 229, 0.36));
+  /* 骨架屏 */
+  --vh-shimmer: linear-gradient(90deg, rgba(120,140,255,0.06) 0%, rgba(120,140,255,0.16) 50%, rgba(120,140,255,0.06) 100%);
+  /* 阴影 */
+  --vh-shadow: 0 2px 14px rgba(0, 0, 0, 0.38);
+  --vh-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.50);
+}
+
+/* 浅色主题：低饱和护眼配色，弱化光效、加深文字对比 */
+:global(body:not([data-ds-dark-theme])) {
+  --vh-cyan: #0d9488;
+  --vh-blue: #1373c4;
+  --vh-purple: #7248d9;
+  --vh-magenta: #cf3d86;
+  --vh-brand-grad: linear-gradient(135deg, #0b7f74, #1373c4);
+  --vh-surface: rgba(249, 251, 254, 0.96);
+  --vh-page-bg: #f4f6fa;
+  --vh-panel: rgba(15, 23, 42, 0.04);
+  --vh-panel-raised: rgba(15, 23, 42, 0.07);
+  --vh-input: rgba(241, 245, 249, 0.95);
+  --vh-code: rgba(15, 23, 42, 0.05);
+  --vh-border: rgba(15, 23, 42, 0.12);
+  --vh-border-strong: rgba(15, 23, 42, 0.22);
+  --vh-divider: rgba(15, 23, 42, 0.08);
+  --vh-text-1: #17233b;
+  --vh-text-2: rgba(51, 65, 85, 0.82);
+  --vh-text-3: rgba(100, 116, 139, 0.78);
+  --vh-hover: rgba(15, 23, 42, 0.05);
+  --vh-idle-dot: rgba(15, 23, 42, 0.20);
+  --vh-accent-text: #0b6f66;
+  --vh-accent-bg: rgba(13, 148, 136, 0.09);
+  --vh-accent-bg-hover: rgba(13, 148, 136, 0.14);
+  --vh-accent-border: rgba(11, 111, 102, 0.38);
+  --vh-accent-ring: rgba(11, 111, 102, 0.35);
+  --vh-accent-glow: 0 1px 6px rgba(11, 111, 102, 0.15);
+  --vh-glow-sm: 0 4px 14px rgba(15, 23, 42, 0.10);
+  --vh-ok: #0d9488;
+  --vh-warn: #b45309;
+  --vh-bad: #dc2626;
+  --vh-ok-border: rgba(13, 148, 136, 0.30);
+  --vh-warn-border: rgba(180, 83, 9, 0.35);
+  --vh-warn-glow-weak: rgba(180, 83, 9, 0.25);
+  --vh-warn-glow-strong: rgba(180, 83, 9, 0.40);
+  --vh-bad-border: rgba(220, 38, 38, 0.32);
+  --vh-line: linear-gradient(180deg, rgba(11, 111, 102, 0.45), rgba(19, 115, 196, 0.22));
+  --vh-order-bg: linear-gradient(135deg, rgba(13, 148, 136, 0.28), rgba(19, 115, 196, 0.30));
+  --vh-shimmer: linear-gradient(90deg, rgba(15,23,42,0.05) 0%, rgba(15,23,42,0.11) 50%, rgba(15,23,42,0.05) 100%);
+  --vh-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+  --vh-shadow-lg: 0 10px 26px rgba(15, 23, 42, 0.12);
+}
+
+/* ── 根容器 ── */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background:
+    radial-gradient(120% 45% at 50% 0%, rgba(0, 245, 212, 0.045) 0%, transparent 70%),
+    var(--vh-surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid var(--vh-border);
+  overflow: hidden;
+  transition:
+    width var(--vh-dur) var(--vh-ease),
+    background 250ms var(--vh-ease),
+    border-color 250ms var(--vh-ease);
+}
+
+/* 浅色下去掉玻璃模糊：实底更清爽，避免暗色残影 */
+:global(body:not([data-ds-dark-theme])) .root {
+  background: #f7f9fc;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 折叠状态 */
+.collapsed {
+  width: 56px;
+}
+
+.collapsed .brandRow {
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 6px;
+}
+
+/* 淡出阶段 */
+.fading > * {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+/* Rail 入场 */
+.railIn .iconButton {
+  animation: vh-rail-in 200ms var(--vh-ease) forwards;
+}
+
+@keyframes vh-rail-in {
+  from { transform: translateX(10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* ── 品牌行 ── */
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 12px;
+  flex: none;
+  border-bottom: 1px solid var(--vh-divider);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 8px;
+  transition: background 150ms;
+}
+
+.brand:hover {
+  background: var(--vh-hover);
+}
+
+.brandIdentity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brandName {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: transparent;
+  background: var(--vh-brand-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 8px rgba(0, 245, 212, 0.35));
+}
+
+:global(body:not([data-ds-dark-theme])) .brandName {
+  filter: none;
+}
+
+/* ── 图标按钮 ── */
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vh-text-3);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+  flex: none;
+}
+
+.iconButton:hover {
+  background: var(--vh-hover);
+  color: var(--vh-text-1);
+}
+
+.panelIcon {
+  transition: transform var(--vh-dur) var(--vh-ease);
+}
+
+.collapsed .panelIcon {
+  transform: rotate(180deg);
+}
+
+/* ── 主体 ── */
+.body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  gap: 8px;
+}
+
+.body::-webkit-scrollbar { width: 3px; }
+.body::-webkit-scrollbar-thumb {
+  background: var(--vh-border-strong);
+  border-radius: 3px;
+}
+.body::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 导航区 ── */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background var(--vh-dur-fast) var(--vh-ease),
+    color var(--vh-dur-fast) var(--vh-ease),
+    border-color var(--vh-dur-fast) var(--vh-ease),
+    box-shadow var(--vh-dur-fast) var(--vh-ease),
+    transform var(--vh-dur-fast) var(--vh-ease);
+}
+
+.navItem:hover {
+  background: var(--vh-hover);
+  color: var(--vh-text-1);
+}
+
+.navItem:active {
+  transform: scale(0.985);
+}
+
+.navItemActive {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  box-shadow: var(--vh-accent-glow);
+}
+
+/* 激活项左侧霓虹光条 */
+.navItemActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.5px;
+  height: 55%;
+  border-radius: 2px;
+  background: var(--vh-brand-grad);
+  box-shadow: 0 0 8px rgba(0, 245, 212, 0.55);
+}
+
+.navIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex: none;
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navBadge {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vh-text-3);
+  background: var(--vh-panel-raised);
+  padding: 0 6px;
+  border-radius: 100px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.navItemActive .navBadge {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg-hover);
+}
+
+/* ── 模式快捷卡 ── */
+.modeSection {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--vh-divider);
+}
+
+/* 减小动画 */
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+  .fading > * {
+    transition: none;
+  }
+  .navItem,
+  .panelIcon {
+    transition: none;
+  }
+}

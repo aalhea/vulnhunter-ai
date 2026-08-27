@@ -1,0 +1,2 @@
+name: Pebble · 小程序挖掘
+description: 小程序安全测试专项：反编译包静态分析（vh-jss 自带工具链）+ first-miniapp 动态调试 MCP，提取密钥/接口/越权面并验证。

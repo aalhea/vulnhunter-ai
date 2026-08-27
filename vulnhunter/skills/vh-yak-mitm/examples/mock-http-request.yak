@@ -1,0 +1,76 @@
+/*
+示例: [Mock] mockHTTPRequest 危险操作护栏
+关键词: mockHTTPRequest, MITM 热加载, 危险操作保护, DELETE, PUT, 无污染测试
+适用场景: 在生产/演练环境做 MITM 测试时希望"看得到、点得动"但不真正破坏数据, 把 DELETE/PUT 等危险请求改成 mock 成功响应, 原请求不出站
+参考: yak-project-public 024 (2025-12-05) Mock 重塑无污染客户端测试
+
+签名: mockHTTPRequest(isHttps, url, req, mockResponse)
+  - 调用 mockResponse(rspString) 即用本地构造的响应替代真实请求, 原请求不发出
+  - 不调用 mockResponse 则请求正常出站
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+DANGEROUS_METHODS = ["DELETE", "PUT", "PATCH"]
+DANGEROUS_PATH_KEYWORDS = ["/delete", "/destroy", "/drop", "/purge"]
+
+isDangerousMethod = func(method) {
+    upper = str.ToUpper(method)
+    for m in DANGEROUS_METHODS {
+        if upper == m { return true }
+    }
+    return false
+}
+
+isDangerousPath = func(url) {
+    lower = str.ToLower(url)
+    for kw in DANGEROUS_PATH_KEYWORDS {
+        if str.Contains(lower, kw) { return true }
+    }
+    return false
+}
+
+buildBlockedResponse = func(method, url) {
+    body = json.dumps({"ok": false, "code": 403, "msg": "dangerous operation blocked", "method": method}, json.withIndent(""))
+    return "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nX-Mitm-Protect: 1\r\nContent-Length: " + sprintf("%d", len(body)) + "\r\n\r\n" + body
+}
+
+mockHTTPRequest = func(isHttps, url, req, mockResponse) {
+    method = poc.GetHTTPRequestMethod(req)
+    if isDangerousMethod(method) || isDangerousPath(url) {
+        log.warn(sprintf("dangerous operation blocked: %s %s", method, url))
+        mockResponse(buildBlockedResponse(method, url))
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mock danger protect self test")
+
+    captured = {"rsp": ""}
+    mockResponse = func(rsp) { captured["rsp"] = rsp }
+
+    delReq := []byte("DELETE /api/users/1 HTTP/1.1\r\nHost: target\r\n\r\n")
+    mockHTTPRequest(false, "http://target/api/users/1", delReq, mockResponse)
+    assert captured["rsp"] != "", "DELETE should be blocked"
+    assert str.Contains(captured["rsp"], "X-Mitm-Protect: 1"), "should have protect header"
+    log.info("blocked DELETE response built")
+
+    captured["rsp"] = ""
+    pathReq := []byte("POST /admin/users/delete HTTP/1.1\r\nHost: target\r\n\r\n{\"id\":1}")
+    mockHTTPRequest(false, "http://target/admin/users/delete", pathReq, mockResponse)
+    assert captured["rsp"] != "", "POST to dangerous path should be blocked"
+
+    captured["rsp"] = ""
+    safeReq := []byte("GET /api/users HTTP/1.1\r\nHost: target\r\n\r\n")
+    mockHTTPRequest(false, "http://target/api/users", safeReq, mockResponse)
+    assert captured["rsp"] == "", "safe GET should not be mocked"
+
+    log.info("mock danger protect self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

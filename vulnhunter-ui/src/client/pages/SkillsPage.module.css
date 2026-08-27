@@ -1,0 +1,14 @@
+/* SkillsPage — 技能库页 */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.panel {
+  border: 1px solid var(--vh-border);
+  border-radius: 14px;
+  background: var(--vh-panel);
+  padding: 16px;
+}

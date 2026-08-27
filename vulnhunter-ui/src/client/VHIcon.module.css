@@ -1,0 +1,51 @@
+/* VHIcon — 闪电品牌图标 */
+
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  position: relative;
+}
+
+.lightning {
+  transition: filter 200ms ease;
+}
+
+/* Hover 发光脉冲（浅色主题下减弱） */
+.glowHover:hover .lightning {
+  filter: drop-shadow(0 0 6px rgba(0, 245, 212, 0.55))
+          drop-shadow(0 0 12px rgba(0, 187, 249, 0.35));
+}
+
+:global(body:not([data-ds-dark-theme])) .glowHover:hover .lightning {
+  filter: drop-shadow(0 0 5px rgba(13, 148, 136, 0.35))
+          drop-shadow(0 0 10px rgba(19, 115, 196, 0.25));
+}
+
+/* 持续脉冲发光（用于 hero 品牌标记） */
+@keyframes vh-icon-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(0, 245, 212, 0.3))
+            drop-shadow(0 0 8px rgba(0, 187, 249, 0.2));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(0, 245, 212, 0.6))
+            drop-shadow(0 0 16px rgba(0, 187, 249, 0.4))
+            drop-shadow(0 0 24px rgba(155, 93, 229, 0.2));
+  }
+}
+
+.pulse {
+  animation: vh-icon-pulse 3s ease-in-out infinite;
+}
+
+/* 减小动画 */
+@media (prefers-reduced-motion: reduce) {
+  .glowHover:hover .lightning {
+    filter: none;
+  }
+  .pulse {
+    animation: none;
+  }
+}

@@ -1,0 +1,85 @@
+/*
+示例: [入库] hijackSaveHTTPFlow 敏感关键字打标签 + 染色
+关键词: hijackSaveHTTPFlow, MITM 热加载, 入库改写, AddTag, 流量染色, 敏感词
+适用场景: 流量写入 History 数据库前, 根据命中的关键字给 flow 打 tag 并染色, 便于在历史中检索定位
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 数据包存储处理类
+
+签名: hijackSaveHTTPFlow(flow, modify, drop)
+  - flow.Request / flow.Response 是 codec.StrconvQuote 之后的字符串, 需 Unquote 取原文
+  - 染色用 flow.Red()/Orange()/Yellow()/... , 打标签用 flow.AddTag(name)
+  - 必须调用 modify(flow) 提交修改, 否则改动不入库
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+KEYWORDS = [
+    {"key": "password", "tag": "credential", "color": "Red"},
+    {"key": "secret", "tag": "credential", "color": "Red"},
+    {"key": "id_card", "tag": "pii", "color": "Orange"},
+    {"key": "admin", "tag": "admin-related", "color": "Purple"},
+]
+
+applyColor = func(flow, color) {
+    if color == "Red" { flow.Red() }
+    if color == "Orange" { flow.Orange() }
+    if color == "Yellow" { flow.Yellow() }
+    if color == "Purple" { flow.Purple() }
+}
+
+scanAndTag = func(flow) {
+    req = codec.StrconvUnquote(flow.Request)~
+    rsp = codec.StrconvUnquote(flow.Response)~
+    text = str.ToLower(string(req) + "\n" + string(rsp))
+    for item in KEYWORDS {
+        if str.Contains(text, str.ToLower(item.key)) {
+            flow.AddTag(item.tag)
+            applyColor(flow, item.color)
+        }
+    }
+}
+
+hijackSaveHTTPFlow = func(flow, modify, drop) {
+    scanAndTag(flow)
+    modify(flow)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+用 map 模拟 *yakit.HTTPFlow, 把 AddTag 与颜色方法 stub 出来观察调用
+*/
+func runSelfTest() {
+    log.info("start save flow tag color self test")
+
+    req = "POST /api/login HTTP/1.1\r\nHost: target.local\r\n\r\nusername=admin&password=Passw0rd!"
+    rsp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"secret\":\"top\",\"id_card\":\"110101199001011234\"}"
+
+    tags = []
+    colors = []
+    flow = make(map[string]any)
+    flow["Request"] = codec.StrconvQuote(req)
+    flow["Response"] = codec.StrconvQuote(rsp)
+    flow["AddTag"] = func(t...) { for one in t { tags = append(tags, one) } }
+    flow["Red"] = func() { colors = append(colors, "Red") }
+    flow["Orange"] = func() { colors = append(colors, "Orange") }
+    flow["Yellow"] = func() { colors = append(colors, "Yellow") }
+    flow["Purple"] = func() { colors = append(colors, "Purple") }
+
+    saved = []
+    modify = func(f) { saved = append(saved, f) }
+    drop = func() { log.error("should not drop") }
+
+    hijackSaveHTTPFlow(flow, modify, drop)
+
+    log.info(sprintf("hit tags: %v, colors: %v", tags, colors))
+    assert len(saved) == 1, "modify must be called exactly once"
+    assert "credential" in tags, "credential tag should be added (secret)"
+    assert "pii" in tags, "pii tag should be added (id_card)"
+    assert "admin-related" in tags, "admin tag should be added"
+    assert "Red" in colors, "Red color should be applied"
+
+    log.info("save flow tag color self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

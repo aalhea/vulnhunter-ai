@@ -1,0 +1,76 @@
+/*
+示例: Yakit 插件最小骨架 - 日志输出 + 进度条 + 状态卡片
+关键词: yakit.Info, yakit.SetProgress, yakit.StatusCard, YAK_MAIN, runSelfTest
+适用场景: 从零开始写一个 Yakit 原生插件的骨架模板
+验证: yak basic-plugin-skeleton.yak
+
+互链:
+  - Yakit 基本使用见 skills/yakit-basic/SKILL.md
+  - yak 脚本与 UI 交互机制见 skills/yakit-ui-binding/SKILL.md
+  - cli 参数表单见 skills/yakit-native-plugin/SKILL.md
+*/
+
+// 纯函数: 把目标列表去重
+// 关键词: 去重
+dedupTargets = func(targets) {
+    seen = {}
+    out = []
+    for t in targets {
+        t = str.TrimSpace(t)
+        if t == "" { continue }
+        if t in seen { continue }
+        seen[t] = true
+        out = append(out, t)
+    }
+    return out
+}
+
+func runPlugin() {
+    // 模拟目标列表
+    rawTargets = ["10.0.0.1", "10.0.0.2", "10.0.0.1", "10.0.0.3", ""]
+    targets = dedupTargets(rawTargets)
+
+    // 日志: 开始
+    // 关键词: yakit.Info, printf
+    yakit.Info("starting scan with %d unique targets", len(targets))
+
+    // 进度条 + 状态卡片
+    // 关键词: yakit.SetProgress, yakit.StatusCard
+    yakit.SetProgress(0)
+    yakit.StatusCard("Targets", sprintf("0/%d", len(targets)), "scan")
+
+    for i = 0; i < len(targets); i++ {
+        t = targets[i]
+        yakit.Info("scanning target: %s", t)
+
+        // 模拟扫描 (这里只 sleep 一小段)
+        sleep(0.01)
+
+        // 更新进度
+        yakit.SetProgress(float(i + 1) / float(len(targets)))
+        yakit.StatusCard("Targets", sprintf("%d/%d", i + 1, len(targets)), "scan")
+    }
+
+    // 完成
+    yakit.SetProgress(1.0)
+    yakit.StatusCard("Targets", sprintf("%d/%d", len(targets), len(targets)), "done")
+    yakit.Success("scan completed")
+}
+
+func runSelfTest() {
+    // 测试纯函数
+    result = dedupTargets(["a", "b", "a", "", "c", "b"])
+    assert len(result) == 3, "should have 3 unique non-empty targets"
+    assert result[0] == "a", "first target should be a"
+    assert result[1] == "b", "second target should be b"
+    assert result[2] == "c", "third target should be c"
+
+    // 运行插件流程 (命令行下 yakit.* 退化为 stdout)
+    runPlugin()
+
+    log.info("... self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

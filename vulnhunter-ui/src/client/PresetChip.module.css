@@ -1,0 +1,152 @@
+/* PresetChip — composer.dock 上的模式 chip */
+
+.wrap {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--vh-border);
+  border-radius: 100px;
+  background: var(--vh-panel);
+  color: var(--vh-text-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color var(--vh-dur-fast) var(--vh-ease),
+    background var(--vh-dur-fast) var(--vh-ease),
+    border-color var(--vh-dur-fast) var(--vh-ease),
+    box-shadow var(--vh-dur-fast) var(--vh-ease);
+}
+
+.chip:hover,
+.chipOpen {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  box-shadow: var(--vh-accent-glow);
+}
+
+.chipLabel {
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.chipValue {
+  font-weight: 600;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+
+.caret {
+  font-size: 8px;
+  transition: transform var(--vh-dur-fast) var(--vh-ease);
+}
+
+.caretOpen {
+  transform: rotate(180deg);
+}
+
+.notice {
+  font-size: 10px;
+  color: var(--vh-warn);
+}
+
+/* 下拉 roster */
+.menu {
+  position: absolute;
+  right: 4px;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 180px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--vh-border);
+  border-radius: 12px;
+  background: var(--vh-surface);
+  box-shadow: var(--vh-shadow-lg);
+  animation: vh-chip-menu-in 160ms var(--vh-ease-out) both;
+}
+
+@keyframes vh-chip-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.menuEmpty {
+  padding: 8px;
+  font-size: 11px;
+  color: var(--vh-text-3);
+  text-align: center;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--vh-dur-fast) var(--vh-ease), color var(--vh-dur-fast) var(--vh-ease);
+}
+
+.item:hover:not(:disabled) {
+  background: var(--vh-hover);
+  color: var(--vh-text-1);
+}
+
+.itemActive {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+}
+
+.item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.itemName {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemDefault {
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--vh-text-3);
+  border: 1px solid var(--vh-border);
+  padding: 0 5px;
+  border-radius: 100px;
+  line-height: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu { animation: none; }
+  .chip, .caret, .item { transition: none; }
+}

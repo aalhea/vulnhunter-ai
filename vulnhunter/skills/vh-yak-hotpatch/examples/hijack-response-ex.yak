@@ -1,0 +1,52 @@
+/*
+示例: [全局] hijackHTTPResponseEx 凭请求上下文有条件改写响应
+关键词: 全局热加载, GlobalHotPatch, hijackHTTPResponseEx, 请求上下文, 条件改写, forward
+适用场景: 全局层面只对带特定请求头的调试流量改写响应 (拿到 req+rsp), 其余流量原样放行
+参考: yak-project-public 009 全局热加载
+
+全局与 MITM 共用 hook (见 mitm-hotpatch/examples/hijack-response-ex.yak)
+签名: hijackHTTPResponseEx(isHttps, url, req, rsp, forward, drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+DEBUG_REQ_HEADER = "X-Yak-Debug"
+
+hijackHTTPResponseEx = func(isHttps, url, req, rsp, forward, drop) {
+    // 只有请求带调试头时才在响应里追加全局调试标记, 体现 Ex 需要 req 上下文
+    if poc.GetHTTPPacketHeader(req, DEBUG_REQ_HEADER) != "1" {
+        forward(rsp)
+        return
+    }
+    forward(poc.ReplaceHTTPPacketHeader(rsp, "X-Yakit-Global-Debug", "matched"))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global hijack response ex self test")
+
+    captured = {"rsp": []byte("")}
+    forward = func(b) { captured["rsp"] = b }
+    drop = func() { log.error("should not drop") }
+
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    // 带调试头 -> 追加标记
+    dbgReq := []byte("GET / HTTP/1.1\r\nHost: t.local\r\nX-Yak-Debug: 1\r\n\r\n")
+    hijackHTTPResponseEx(false, "http://t.local/", dbgReq, rsp, forward, drop)
+    assert poc.GetHTTPPacketHeader(captured["rsp"], "X-Yakit-Global-Debug") == "matched", "debug traffic should be marked"
+
+    // 普通请求 -> 不改
+    captured["rsp"] = []byte("")
+    plainReq := []byte("GET / HTTP/1.1\r\nHost: t.local\r\n\r\n")
+    hijackHTTPResponseEx(false, "http://t.local/", plainReq, rsp, forward, drop)
+    assert poc.GetHTTPPacketHeader(captured["rsp"], "X-Yakit-Global-Debug") == "", "normal traffic should not be marked"
+
+    log.info("global hijack response ex self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

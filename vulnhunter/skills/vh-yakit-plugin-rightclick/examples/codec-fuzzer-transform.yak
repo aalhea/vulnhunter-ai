@@ -1,0 +1,78 @@
+/*
+示例: 右键 codec 插件(Web Fuzzer) - 选中一段文本做"奇怪变换"(逐字符混合编码绕过)
+关键词: codec 插件, Web Fuzzer 右键, 选区变换, 混合编码, WAF 绕过, url/html/unicode 编码
+适用场景: 在 Web Fuzzer 请求编辑器里选中一段(如参数值 payload), 右键 -> 插件扩展 -> 本插件,
+          把选中文本逐字符用不同编码混合输出(url %xx / html &#d; / unicode \uXXXX / 原文交替),
+          得到一个"语义等价但形态怪异"的变体, 常用于探测/绕过基于关键词的简单 WAF。
+验证: yak codec-fuzzer-transform.yak                    # 自测确定性变换
+      yak codec-plugin --script codec-fuzzer-transform.yak --input "<script>alert(1)</script>"
+
+契约: codec 插件只需 handle(input); input = 当前选中文本; 返回值显示在 Codec 结果面板。
+说明: 这里用"按字符下标取模"选择编码, 输出是 **确定性** 的(便于自测); 想要真随机可换 randn。
+
+互链:
+  - codec 契约 / Web Fuzzer 两层右键菜单见 skills/yakit-rightclick-plugin/SKILL.md
+  - 想做加解密类右键工具见 skills/yakit-rightclick-plugin/examples/codec-base64-wrap.yak
+*/
+
+// 纯函数: 把单个字节按指定模式编码为等价形态
+// 关键词: 字符编码变体, url/html/unicode
+encodeByte = func(b /* int 0-255 */, mode) {
+    if mode == 0 {
+        return string([byte(b)])                 // 原文
+    } else if mode == 1 {
+        return "%" + str.ToUpper(codec.EncodeToHex(string([byte(b)])))  // url: %XX
+    } else if mode == 2 {
+        return sprintf("&#%d;", b)               // html 十进制实体
+    }
+    return sprintf("\\u%04x", b)                 // unicode: \uXXXX
+}
+
+// 纯函数: 逐字符做混合编码变换(确定性: 第 i 个字符用 i%4 模式)
+// 关键词: 选区变换核心, 混合编码
+weirdTransform = func(input) {
+    raw = []byte(input)
+    parts = []
+    i = 0
+    for i < len(raw) {
+        parts = append(parts, encodeByte(int(raw[i]), i % 4))
+        i++
+    }
+    return str.Join(parts, "")
+}
+
+// codec 右键唯一入口
+// 关键词: handle, codec 插件入口
+handle = func(input) {
+    return weirdTransform(input)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+变换是确定性的, 直接断言输出; 并验证混合编码里包含各形态
+*/
+func runSelfTest() {
+    log.info("start codec-fuzzer-transform self test")
+
+    // "admin" -> a(raw) d(url %64) m(html &#109;) i(unicode \u0069) n(raw)
+    out = handle("admin")
+    log.info("admin -> %s", out)   // 注意: log.info 是 printf 风格, 含 % 的内容要用 %s 占位, 不能直接拼接
+    assert out == `a%64&#109;\u0069n`, f"unexpected transform: ${out}"
+
+    // 各形态都应出现在某个样本里
+    s = handle("AB")  // A(raw) B(url %42)
+    assert str.Contains(s, "A"), "first char raw"
+    assert str.Contains(s, "%42"), "second char url-encoded"
+
+    // 空输入安全
+    assert handle("") == "", "empty input -> empty output"
+
+    // url 解码能还原被 url 编码的那部分(局部可逆性)
+    assert str.Contains(handle("ab"), "%62"), "b should be url-encoded as %62"
+
+    log.info("codec-fuzzer-transform self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

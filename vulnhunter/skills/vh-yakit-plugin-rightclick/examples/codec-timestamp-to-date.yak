@@ -1,0 +1,58 @@
+/*
+示例: 右键 codec 插件 - Unix 时间戳转可读日期 (UTC)
+关键词: codec 插件, handle, 右键菜单, 时间戳, Unix timestamp, 日期转换
+适用场景: 响应/JWT 里看到一串 10 位 (秒) 或 13 位 (毫秒) 时间戳, 选中右键一键转 UTC 日期
+验证: yak codec-plugin --script codec-timestamp-to-date.yak --input "1700000000"
+
+契约: handle(input) -> string
+*/
+
+// 安全的字符串转 int, 非纯数字返回 nil
+// 关键词: re.Match, int 转换
+atoi = func(s) {
+    if !re.Match("^[0-9]+$", s) {
+        return nil
+    }
+    return int(s)
+}
+
+// codec 插件入口: 自动识别秒/毫秒级时间戳并转 UTC 日期
+// 关键词: handle, time.Unix, UTC, parseInt
+handle = func(input) {
+    s = str.TrimSpace(input)
+    n = atoi(s)
+    if n == nil {
+        return "not a numeric timestamp: " + s
+    }
+    sec = n
+    // 13 位按毫秒处理
+    if len(s) >= 13 {
+        sec = n / 1000
+    }
+    t = time.Unix(sec, 0).UTC()
+    return t.Format("2006-01-02 15:04:05") + " UTC"
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start codec timestamp to date self test")
+
+    out = handle("1700000000")
+    log.info("seconds -> " + out)
+    assert out == "2023-11-14 22:13:20 UTC", f"unexpected seconds conversion: ${out}"
+
+    outMs = handle("1700000000000")
+    log.info("millis -> " + outMs)
+    assert outMs == "2023-11-14 22:13:20 UTC", f"unexpected millis conversion: ${outMs}"
+
+    bad = handle("not-a-number")
+    assert str.Contains(bad, "not a numeric"), "non-numeric input should be reported"
+
+    log.info("codec timestamp to date self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

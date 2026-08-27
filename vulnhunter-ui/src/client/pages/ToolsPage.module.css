@@ -1,0 +1,271 @@
+/* ToolsPage — 工具箱页 */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.headRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vh-text-2);
+  letter-spacing: 0.02em;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--vh-text-3);
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--vh-bad);
+}
+
+/* 目标选择 */
+.targetBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.targetLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vh-text-3);
+}
+
+.targetChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.targetChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--vh-border);
+  border-radius: 100px;
+  background: var(--vh-panel);
+  color: var(--vh-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 180ms var(--vh-ease),
+    background 180ms var(--vh-ease),
+    border-color 180ms var(--vh-ease),
+    box-shadow 180ms var(--vh-ease);
+}
+
+.targetChip:hover {
+  color: var(--vh-text-1);
+  border-color: var(--vh-border-strong);
+}
+
+.targetChipActive {
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  box-shadow: var(--vh-accent-glow);
+}
+
+.targetMeta {
+  font-size: 10px;
+  color: var(--vh-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 工具卡片 */
+.toolGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.toolCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--vh-border);
+  border-radius: 14px;
+  background: var(--vh-panel);
+  transition:
+    border-color 200ms var(--vh-ease),
+    background 200ms var(--vh-ease),
+    transform 200ms var(--vh-ease),
+    box-shadow 200ms var(--vh-ease),
+    opacity 200ms var(--vh-ease);
+}
+
+.toolCard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--vh-shadow);
+}
+
+.toolOn {
+  border-color: var(--vh-ok-border);
+}
+
+.toolOff {
+  opacity: 0.62;
+}
+
+.toolHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vh-text-1);
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolState {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.stateOkText { color: var(--vh-ok); }
+.stateIdleText { color: var(--vh-text-3); }
+
+/* 开关 */
+.switch {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 17px;
+  border-radius: 100px;
+  border: 1px solid var(--vh-border-strong);
+  background: var(--vh-input);
+  cursor: pointer;
+  padding: 0;
+  transition: background 200ms var(--vh-ease), border-color 200ms var(--vh-ease);
+}
+
+.knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--vh-text-3);
+  transition: transform 200ms var(--vh-ease-spring), background 200ms var(--vh-ease);
+}
+
+.switchOn {
+  background: var(--vh-ok);
+  border-color: var(--vh-ok);
+}
+
+.switchOn .knob {
+  transform: translateX(13px);
+  background: #fff;
+}
+
+.toolDesc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vh-text-2);
+  line-height: 1.5;
+}
+
+.toolGroup {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vh-accent-text);
+  background: var(--vh-accent-bg);
+}
+
+/* 指令编辑 */
+.instructionLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.instructionTitle {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vh-text-3);
+}
+
+.instruction {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 7px 9px;
+  border: 1px solid var(--vh-border);
+  border-radius: 8px;
+  background: var(--vh-input);
+  color: var(--vh-text-1);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 180ms var(--vh-ease), box-shadow 180ms var(--vh-ease);
+}
+
+.instruction::placeholder {
+  color: var(--vh-text-3);
+}
+
+.instruction:focus {
+  border-color: var(--vh-accent-border);
+  box-shadow: 0 0 0 2px var(--vh-accent-bg-hover);
+}
+
+.skeleton {
+  height: 110px;
+  border-radius: 14px;
+  background: var(--vh-shimmer);
+  background-size: 200px 100%;
+  animation: vh-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes vh-shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolCard { transition: none; }
+  .toolCard:hover { transform: none; }
+  .knob { transition: none; }
+  .skeleton { animation: none; }
+}

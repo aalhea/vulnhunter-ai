@@ -1,0 +1,339 @@
+/* SkillsPanel — 交互式技能面板 */
+
+/* 骨架屏闪烁 */
+@keyframes vh-shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+/* ── 搜索框 ── */
+.searchWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 8px;
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.searchInput {
+  width: 100%;
+  height: 28px;
+  padding: 0 28px 0 26px;
+  border: 1px solid var(--vh-border);
+  border-radius: 8px;
+  background: var(--vh-input);
+  color: var(--vh-text-1);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 200ms, box-shadow 200ms, background 250ms ease;
+}
+
+.searchInput::placeholder {
+  color: var(--vh-text-3);
+}
+
+.searchInput:focus {
+  border-color: var(--vh-accent-border);
+  box-shadow: 0 0 0 2px var(--vh-accent-bg-hover);
+}
+
+.searchClear {
+  position: absolute;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vh-text-3);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.searchClear:hover {
+  background: var(--vh-hover);
+  color: var(--vh-text-1);
+}
+
+/* ── 分类过滤标签 ── */
+.filterRow {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.filterBadge {
+  padding: 2px 8px;
+  border: 1px solid var(--vh-border);
+  border-radius: 100px;
+  background: transparent;
+  color: var(--vh-text-2);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.filterBadge:hover {
+  background: var(--vh-hover);
+  border-color: var(--vh-border-strong);
+}
+
+.filterBadgeActive {
+  background: var(--vh-accent-bg);
+  border-color: var(--vh-accent-border);
+  color: var(--vh-accent-text);
+  box-shadow: var(--vh-accent-glow);
+}
+
+/* ── 技能分组列表 ── */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms;
+}
+
+.groupHeader:hover {
+  background: var(--vh-hover);
+}
+
+.groupChevron {
+  font-size: 8px;
+  color: var(--vh-text-3);
+  transition: transform 200ms cubic-bezier(.22, .61, .36, 1);
+  width: 12px;
+  text-align: center;
+  flex: none;
+}
+
+.groupChevronOpen {
+  transform: rotate(90deg);
+}
+
+.groupLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vh-text-1);
+  text-transform: capitalize;
+}
+
+.groupCount {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vh-text-3);
+  background: var(--vh-panel-raised);
+  padding: 0 5px;
+  border-radius: 4px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 折叠内容 */
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 250ms cubic-bezier(.22, .61, .36, 1),
+              opacity 200ms ease;
+}
+
+.groupBodyOpen {
+  max-height: 400px;
+  opacity: 1;
+}
+
+/* 技能行 */
+.skillRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--vh-text-2);
+  transition: background 150ms;
+}
+
+.skillRow:hover {
+  background: var(--vh-hover);
+}
+
+.skillDot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--vh-accent-text);
+  opacity: 0.55;
+}
+
+.skillName {
+  font-weight: 500;
+  color: var(--vh-text-1);
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+}
+
+.skillDesc {
+  margin-left: 4px;
+  color: var(--vh-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillCount {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--vh-text-3);
+  flex: none;
+}
+
+/* ── 骨架屏 ── */
+.skeletonSearch,
+.skeletonHeader,
+.skeletonRow {
+  background: var(--vh-shimmer);
+  background-size: 200px 100%;
+  animation: vh-shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.skeletonSearch {
+  height: 28px;
+  width: 100%;
+}
+
+.skeletonFilters {
+  display: flex;
+  gap: 4px;
+}
+
+.skeletonBadge {
+  width: 40px;
+  height: 20px;
+  border-radius: 100px;
+  background: var(--vh-shimmer);
+  background-size: 200px 100%;
+  animation: vh-shimmer 1.5s ease-in-out infinite;
+}
+
+.skeletonGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.skeletonHeader {
+  height: 20px;
+  width: 60%;
+}
+
+.skeletonRow {
+  height: 18px;
+  width: 80%;
+  margin-left: 16px;
+}
+
+/* ── 错误状态 ── */
+.errorState,
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  text-align: center;
+}
+
+.errorIcon {
+  font-size: 20px;
+  opacity: 0.5;
+}
+
+.errorText {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vh-text-3);
+  line-height: 1.4;
+}
+
+.retryBtn {
+  padding: 4px 12px;
+  border: 1px solid var(--vh-accent-border);
+  border-radius: 6px;
+  background: var(--vh-accent-bg);
+  color: var(--vh-accent-text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 200ms, box-shadow 200ms;
+}
+
+.retryBtn:hover {
+  background: var(--vh-accent-bg-hover);
+  box-shadow: var(--vh-accent-glow);
+}
+
+.emptyIcon {
+  font-size: 20px;
+  opacity: 0.4;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vh-text-3);
+}
+
+/* 减小动画 */
+@media (prefers-reduced-motion: reduce) {
+  .skeletonSearch,
+  .skeletonBadge,
+  .skeletonHeader,
+  .skeletonRow {
+    animation: none;
+  }
+  .groupBody {
+    transition: none;
+  }
+}

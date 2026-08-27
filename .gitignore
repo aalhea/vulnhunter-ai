@@ -1,0 +1,11 @@
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+demo/artifacts/
+.hae/
+__pycache__/
+*.pyc
+.env
+.env.*
+config/ui-tools.json

@@ -1,0 +1,105 @@
+/*
+示例: [数据提取] 按 domain 从 History 捞流量 -> URI 去重 -> 提取登录 Cookie
+关键词: db.QueryHTTPFlowsByKeyword, History 数据库, URI 去重, Cookie 提取, 登录态
+适用场景: 截图痛点 - 用户在 History 里积累了大量某站点的流量, 想一键把该域名下所有
+          唯一路径捞出来, 再拿到登录 Cookie, 为后续的路径扫描 / Fuzz 做准备
+
+数据来源说明:
+  - db.QueryHTTPFlowsByKeyword(domain) 返回 *HTTPFlow 迭代器
+  - flow.Url     是完整 URL 字符串
+  - flow.Request 是 codec.StrconvQuote 之后的字符串, 需 Unquote 取原始请求字节
+  - Cookie 从原始请求头里用 poc.GetHTTPPacketHeader(req, "Cookie") 提取
+
+互链:
+  - 字典/发包扫描见同目录 path-scan-with-payload.yak
+  - 数据库 API 见 skills/yaklang-database/SKILL.md
+*/
+
+// 归一化 URI: 去掉 scheme 与 query, 作为去重 key
+// 关键词: URI 去重, 路径归一化
+normalizeURI = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    rest = str.SplitN(rest, "?", 2)[0]
+    return rest
+}
+
+// 从 URL 中取 host (scheme 之后到第一个 / 之前)
+// 关键词: host 提取
+hostOf = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    return str.SplitN(rest, "/", 2)[0]
+}
+
+// 核心: 把 (url, 原始请求字节) 列表归并为唯一 URI 集合 + 每个 host 的登录 Cookie
+// 关键词: 去重, Cookie 提取, 登录态收集
+analyzePairs = func(pairs) {
+    seen = {}
+    uris = []
+    cookies = {}
+    for p in pairs {
+        key = normalizeURI(p.url)
+        if !(key in seen) {
+            seen[key] = true
+            uris = append(uris, key)
+        }
+        ck = poc.GetHTTPPacketHeader(p.req, "Cookie")
+        if ck != "" {
+            cookies[hostOf(p.url)] = ck
+        }
+    }
+    return {"uris": uris, "cookies": cookies}
+}
+
+// 生产用法: 在 Yakit 插件 / yak 脚本里按 domain 从 History 捞数据
+// 关键词: db.QueryHTTPFlowsByKeyword, History 捞取
+collectFromHistory = func(domain) {
+    pairs = []
+    for flow in db.QueryHTTPFlowsByKeyword(domain) {
+        req = codec.StrconvUnquote(flow.Request)~
+        pairs = append(pairs, {"url": flow.Url, "req": []byte(req)})
+    }
+    return analyzePairs(pairs)
+}
+
+/*
+========== 自测块 ==========
+用合成的 (url, request) 列表验证去重与 cookie 提取逻辑, 不依赖真实 History 数据
+*/
+func runSelfTest() {
+    log.info("start collect-domain-urls self test")
+
+    mkReq = func(cookie) {
+        base = "GET / HTTP/1.1\r\nHost: shop.example.com\r\n"
+        if cookie != "" {
+            base += "Cookie: " + cookie + "\r\n"
+        }
+        return []byte(base + "\r\n")
+    }
+
+    pairs = [
+        {"url": "https://shop.example.com/api/order/list?page=1", "req": mkReq("SESSION=abc123")},
+        {"url": "https://shop.example.com/api/order/list?page=2", "req": mkReq("SESSION=abc123")},
+        {"url": "https://shop.example.com/api/user/profile", "req": mkReq("SESSION=abc123")},
+        {"url": "https://shop.example.com/api/user/profile", "req": mkReq("")},
+        {"url": "http://shop.example.com/static/app.js", "req": mkReq("")},
+    ]
+
+    result = analyzePairs(pairs)
+    log.info(sprintf("unique uris: %v", result.uris))
+    log.info(sprintf("cookies: %v", result.cookies))
+
+    // /api/order/list?page=1 与 ?page=2 归一化后相同 -> 去重为 1 条
+    // /api/user/profile 出现两次 -> 1 条; /static/app.js -> 1 条; 共 3 条
+    assert len(result.uris) == 3, f"should dedup to 3 uris, got ${len(result.uris)}"
+    assert "shop.example.com/api/order/list" in result.uris, "order list uri should be collected"
+    assert "shop.example.com/api/user/profile" in result.uris, "profile uri should be collected"
+    assert result.cookies["shop.example.com"] == "SESSION=abc123", "login cookie should be extracted"
+
+    log.info("collect-domain-urls self test passed")
+}
+
+// yak 不会自动调用 func main(), 顶层语句才会执行; 用 YAK_MAIN 守卫,
+// 这样命令行 (YAK_MAIN=true) 跑自测, 被当模块加载时 (YAK_MAIN=false) 不执行
+if YAK_MAIN {
+    runSelfTest()
+}

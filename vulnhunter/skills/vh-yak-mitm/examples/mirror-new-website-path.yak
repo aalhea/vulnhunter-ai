@@ -1,0 +1,59 @@
+/*
+示例: [镜像] mirrorNewWebsitePath 新路径发现与收集
+关键词: mirrorNewWebsitePath, MITM 热加载, 镜像流量, 路径发现, 站点结构, 去重
+适用场景: 同一域名下每个新路径只触发一次, 用于自动构建站点目录结构 / 触发目录爆破 / API 端点发现
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 镜像类
+
+镜像类 hook 都以 mirror 开头, 只能观察分析流量, 无法修改通信:
+  mirrorHTTPFlow / mirrorFilteredHTTPFlow / mirrorNewWebsite / mirrorNewWebsitePath / mirrorNewWebsitePathParams
+统一签名: (isHttps, url, req, rsp, body)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 收集发现的新路径 (实际 yakit 中由引擎完成去重, 这里再做一层本地缓存用于演示与统计)
+// 关键词: 路径收集, 去重 set
+DISCOVERED = make(map[string]bool)
+
+// 从 url 提取 host+path 作为去重 key (去掉 scheme 与 query)
+// 关键词: str.TrimPrefix, str.SplitN, host+path
+recordPath = func(url) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    rest = str.SplitN(rest, "?", 2)[0]
+    key = rest
+    if DISCOVERED[key] {
+        return
+    }
+    DISCOVERED[key] = true
+    log.info("discover new path: %s", key)
+}
+
+mirrorNewWebsitePath = func(isHttps, url, req, rsp, body) {
+    recordPath(url)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mirror new website path self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsitePath(false, "http://target.local/admin/login", req, rsp, []byte("ok"))
+    mirrorNewWebsitePath(false, "http://target.local/api/users", req, rsp, []byte("ok"))
+    // 相同路径重复访问 (仅 query 不同) 不应新增
+    mirrorNewWebsitePath(false, "http://target.local/api/users", req, rsp, []byte("ok"))
+
+    log.info(sprintf("discovered count: %d", len(DISCOVERED)))
+    assert len(DISCOVERED) == 2, "should discover exactly 2 unique paths"
+    assert DISCOVERED["target.local/admin/login"], "admin login path should be recorded"
+    assert DISCOVERED["target.local/api/users"], "api users path should be recorded"
+
+    log.info("mirror new website path self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

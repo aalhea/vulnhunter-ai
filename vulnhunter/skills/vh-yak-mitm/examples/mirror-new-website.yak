@@ -1,0 +1,56 @@
+/*
+示例: [镜像] mirrorNewWebsite 新域名发现
+关键词: mirrorNewWebsite, MITM 热加载, 新域名, 资产发现, 每域名一次, 仅观察
+适用场景: 每个新域名只触发一次, 用于自动收集资产清单 / 触发子域名枚举 / 端口扫描的入口
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 镜像类
+
+签名: mirrorNewWebsite(isHttps, url, req, rsp, body)
+  - 引擎对 "schema + host" 去重, 每个新站点只回调一次
+  - 镜像类, 只观察不改写
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 收集发现的新站点, 实际可在此触发 subdomain/synscan 等后续动作
+// 关键词: 新站点收集, host 提取
+NEW_SITES = []
+
+extractHost = func(url) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    return str.SplitN(rest, "/", 2)[0]
+}
+
+mirrorNewWebsite = func(isHttps, url, req, rsp, body) {
+    host = extractHost(url)
+    scheme = "http"
+    if isHttps {
+        scheme = "https"
+    }
+    NEW_SITES = append(NEW_SITES, sprintf("%s://%s", scheme, host))
+    log.info("discover new website: %s://%s", scheme, host)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+注: yakit 引擎负责按域名去重后才回调; 自测里我们对 "每个新域名只调一次" 这个契约直接建模
+*/
+func runSelfTest() {
+    log.info("start mirror new website self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: a.target.local\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsite(false, "http://a.target.local/", req, rsp, []byte("ok"))
+    mirrorNewWebsite(true, "https://b.target.local/login", req, rsp, []byte("ok"))
+
+    log.info(sprintf("new sites: %v", NEW_SITES))
+    assert len(NEW_SITES) == 2, "should record 2 new sites"
+    assert NEW_SITES[0] == "http://a.target.local", "first site host+scheme should match"
+    assert NEW_SITES[1] == "https://b.target.local", "second site host+scheme should match"
+
+    log.info("mirror new website self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

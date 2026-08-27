@@ -1,0 +1,150 @@
+/*
+示例: yakit.* UI 输出全巡览
+关键词: yakit.Info, yakit.Warn, yakit.Error, yakit.Success, yakit.SetProgress, yakit.StatusCard,
+        yakit.EnableTable, yakit.TableData, yakit.NewTable, yakit.NewBarGraph, yakit.Markdown, yakit.Output
+适用场景: 在 Yakit 中执行时展示日志/进度条/状态卡片/动态表格/静态表格/柱状图/Markdown 报告
+验证: yak ui-output-tour.yak
+  命令行运行时 yakit.* 走 VirtualYakitClient, 输出退化为 stdout 日志
+
+互链:
+  - yakit.* 库函数与 UI 交互机制见 skills/yakit-ui-binding/SKILL.md
+  - yakit 基本使用与功能区见 skills/yakit-basic/SKILL.md
+*/
+
+// 纯函数: 把模拟扫描结果按 host 聚合端口计数
+// 关键词: 聚合, 统计
+aggregateByHost = func(results) {
+    m = {}
+    for r in results {
+        h = r[0]
+        if h in m {
+            m[h] = m[h] + 1
+        } else {
+            m[h] = 1
+        }
+    }
+    return m
+}
+
+// 纯函数: 把模拟扫描结果按 port 聚合计数
+// 关键词: 聚合, 统计
+aggregateByPort = func(results) {
+    m = {}
+    for r in results {
+        p = r[1]
+        if p in m {
+            m[p] = m[p] + 1
+        } else {
+            m[p] = 1
+        }
+    }
+    return m
+}
+
+func runPlugin() {
+    // 模拟扫描结果
+    results = [
+        ["10.0.0.1", "80", "http"],
+        ["10.0.0.1", "443", "https"],
+        ["10.0.0.1", "22", "ssh"],
+        ["10.0.0.2", "80", "http"],
+        ["10.0.0.2", "3306", "mysql"],
+        ["10.0.0.3", "443", "https"],
+        ["10.0.0.3", "8080", "http-proxy"],
+        ["10.0.0.3", "6379", "redis"],
+    ]
+
+    // 1. 日志输出
+    // 关键词: yakit.Info, printf format
+    yakit.Info("starting scan with %d targets", len(results))
+
+    // 2. 进度条 + 状态卡片
+    // 关键词: yakit.SetProgress, yakit.StatusCard
+    yakit.SetProgress(0)
+    yakit.StatusCard("Progress", "0/8", "scan")
+
+    // 3. 动态表格: 先声明, 再逐行写入
+    // 关键词: yakit.EnableTable, yakit.TableData
+    yakit.EnableTable("Port Scan Result", ["host", "port", "service"])
+
+    for i = 0; i < len(results); i++ {
+        r = results[i]
+        // 写动态表格行
+        yakit.TableData("Port Scan Result", {
+            "host": r[0],
+            "port": r[1],
+            "service": r[2],
+        })
+        // 更新进度与卡片
+        yakit.SetProgress(float(i + 1) / float(len(results)))
+        yakit.StatusCard("Progress", sprintf("%d/%d", i + 1, len(results)), "scan")
+        yakit.Info("scanned %s:%s -> %s", r[0], r[1], r[2])
+        sleep(0.02)
+    }
+    yakit.SetProgress(1.0)
+    yakit.StatusCard("Progress", "8/8", "done")
+
+    // 4. 静态表格: 收集完再统一输出
+    // 关键词: yakit.NewTable, table.Append, yakit.Output
+    table = yakit.NewTable("Host", "Port", "Service")
+    for r in results {
+        table.Append(r[0], r[1], r[2])
+    }
+    yakit.Output(table)
+
+    // 5. 柱状图: 端口分布
+    // 关键词: yakit.NewBarGraph, graph.Add, yakit.Output
+    portCount = aggregateByPort(results)
+    graph = yakit.NewBarGraph("port distribution")
+    for port, count in portCount {
+        graph.Add(port, count)
+    }
+    yakit.Output(graph)
+
+    // 6. 饼图: 主机分布
+    // 关键词: yakit.NewPieGraph, graph.Add, yakit.Output
+    hostCount = aggregateByHost(results)
+    pie = yakit.NewPieGraph("host distribution")
+    for host, count in hostCount {
+        pie.Add(host, count)
+    }
+    yakit.Output(pie)
+
+    // 7. Markdown 报告
+    // 关键词: yakit.Markdown
+    report = sprintf("# Scan Report\n\n## Overview\n- hosts: %d\n- open ports: %d\n\n## Port Distribution\n| port | count |\n|------|-------|\n", len(hostCount), len(results))
+    for port, count in portCount {
+        report = report + sprintf("| %s | %d |\n", port, count)
+    }
+    yakit.Markdown(report)
+
+    // 8. 成功提示
+    // 关键词: yakit.Success
+    yakit.Success(sprintf("scan completed: %d hosts, %d open ports", len(hostCount), len(results)))
+}
+
+func runSelfTest() {
+    // 验证纯函数
+    results = [
+        ["10.0.0.1", "80", "http"],
+        ["10.0.0.1", "443", "https"],
+        ["10.0.0.2", "22", "ssh"],
+    ]
+    hostMap = aggregateByHost(results)
+    assert hostMap["10.0.0.1"] == 2, "host 10.0.0.1 should have 2 ports"
+    assert hostMap["10.0.0.2"] == 1, "host 10.0.0.2 should have 1 port"
+
+    portMap = aggregateByPort(results)
+    assert portMap["80"] == 1, "port 80 should appear once"
+    assert portMap["443"] == 1, "port 443 should appear once"
+    assert portMap["22"] == 1, "port 22 should appear once"
+
+    // 运行完整插件流程 (命令行下 yakit.* 退化为 stdout 输出)
+    runPlugin()
+
+    log.info("... self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

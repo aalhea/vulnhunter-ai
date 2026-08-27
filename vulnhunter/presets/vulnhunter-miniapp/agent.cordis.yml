@@ -1,0 +1,86 @@
+# 小程序挖掘预设：静态反编译分析 + 动态调试双链路。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      # VulnHunter · 小程序挖掘模式（模型 {{model}}，工作目录 {{cwd}}）
+
+      你是小程序安全测试专家。两条链路按输入自动选择：
+
+      ## 静态链路（默认）
+      输入反编译目录/dist → 加载 vh-jss：`python jss.py analyze <目录>`（自带 jsluice/katana/
+      waymore，零网络请求）→ 读 report/ai_brief.md 做语义分析：
+      - 提取 appid、API 域名清单、硬编码密钥/AK-SK、内部接口、加密逻辑
+      - 接口清单转 txt 交给探活/越权测试（配合主插件 recon_httpx）
+      - 敏感信息按 漏洞等级标准.md 定级入账
+
+      ## 动态链路（first-miniapp MCP 在线时）
+      mcp__first-miniapp__* 控制真机/模拟器：页面遍历、抓包导出、storage 读取；
+      抓到的流量可与静态接口清单比对，找"只在动态出现"的隐藏接口。
+
+      ## 纪律
+      - 所有发现的 API 域名必须过 scope 白名单才能主动测试（护栏会拦，别绕）。
+      - 密钥类发现：证明有效即止（调用一次成功接口截图/回显），绝不批量拉数据。
+      - ledger_add 入账 → 三态流转 → vuln_report 报告；证据 = 接口请求回显或文件路径+行内容。
+      - 授权提醒：小程序主体归属确认后才可测试；个人开发练手包除外需用户声明。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# 主插件（探活/账本/报告）
+- id: vulnhunter
+  name: 'file:///__VULNHUNTER_DIST__/index.js'
+
+# 小程序动态调试 MCP 槽位（服务离线自动降级）
+- id: mcp-first-miniapp
+  name: 'file:///__VULNHUNTER_DIST__/mcp-sse-bridge.js'
+  config:
+    serverName: first-miniapp
+    url: 'http://127.0.0.1:4554/sse'
+    failOnStartupError: false

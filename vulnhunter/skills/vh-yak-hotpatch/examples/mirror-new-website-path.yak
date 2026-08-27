@@ -1,0 +1,45 @@
+/*
+示例: [全局] mirrorNewWebsitePath 全站路径清单
+关键词: 全局热加载, GlobalHotPatch, mirrorNewWebsitePath, 路径发现, 同域名同路径一次, 仅观察
+适用场景: 全局收集所有新路径形成统一站点目录结构 (同域名下每个路径只回调一次)
+参考: yak-project-public 009 全局热加载
+
+签名: mirrorNewWebsitePath(isHttps, url, req, rsp, body) (镜像类无 forward/drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+PATHS = make(map[string]bool)
+
+mirrorNewWebsitePath = func(isHttps, url, req, rsp, body) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    key = str.SplitN(rest, "?", 2)[0]
+    if PATHS[key] {
+        return
+    }
+    PATHS[key] = true
+    log.info("global new path: %s", key)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mirror new website path self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsitePath(false, "http://corp.local/admin", req, rsp, []byte("ok"))
+    mirrorNewWebsitePath(false, "http://corp.local/api/users?id=1", req, rsp, []byte("ok"))
+    mirrorNewWebsitePath(false, "http://corp.local/api/users?id=2", req, rsp, []byte("ok"))
+
+    log.info(sprintf("path count: %d", len(PATHS)))
+    assert len(PATHS) == 2, "query-only differences should not add new paths"
+
+    log.info("global mirror new website path self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

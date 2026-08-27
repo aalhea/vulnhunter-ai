@@ -1,0 +1,61 @@
+/*
+示例: [镜像] mirrorFilteredHTTPFlow 仅过滤后流量
+关键词: mirrorFilteredHTTPFlow, MITM 热加载, 过滤流量, 仅观察, 噪声过滤
+适用场景: 与 mirrorHTTPFlow 区别在于只接收 "通过 MITM 过滤规则" 的流量 (已自动剔除静态资源等噪声),
+         适合做聚焦业务接口的被动分析, 减少静态资源干扰
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 镜像类
+
+签名: mirrorFilteredHTTPFlow(isHttps, url, req, rsp, body)
+  - 引擎层已按过滤规则筛过, 命中此 hook 的都是 "值得关注" 的流量
+  - 仍然是镜像类, 只观察不改写
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 统计过滤后流量里各响应内容类型的分布
+// 关键词: poc.GetHTTPPacketHeader, Content-Type 统计
+TYPE_STATS = make(map[string]int)
+
+bumpType = func(rsp) {
+    ct = str.ToLower(poc.GetHTTPPacketHeader(rsp, "Content-Type"))
+    if ct == "" {
+        ct = "unknown"
+    }
+    // 只取主类型 (application/json; charset=utf-8 -> application/json)
+    ct = str.TrimSpace(str.SplitN(ct, ";", 2)[0])
+    cur = TYPE_STATS[ct]
+    if cur == nil {
+        cur = 0
+    }
+    TYPE_STATS[ct] = cur + 1
+}
+
+mirrorFilteredHTTPFlow = func(isHttps, url, req, rsp, body) {
+    bumpType(rsp)
+    log.info("filtered flow: %s [%s]", url, poc.GetHTTPPacketHeader(rsp, "Content-Type"))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mirror filtered http flow self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    jsonRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{}")
+    htmlRsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>")
+
+    mirrorFilteredHTTPFlow(false, "http://target.local/api/a", req, jsonRsp, []byte("{}"))
+    mirrorFilteredHTTPFlow(false, "http://target.local/api/b", req, jsonRsp, []byte("{}"))
+    mirrorFilteredHTTPFlow(false, "http://target.local/page", req, htmlRsp, []byte("<html>"))
+
+    log.info(sprintf("type stats: %v", TYPE_STATS))
+    assert TYPE_STATS["application/json"] == 2, "should count 2 json flows"
+    assert TYPE_STATS["text/html"] == 1, "should count 1 html flow"
+
+    log.info("mirror filtered http flow self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

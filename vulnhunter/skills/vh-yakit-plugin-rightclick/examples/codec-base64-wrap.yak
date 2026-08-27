@@ -1,0 +1,36 @@
+/*
+示例: 右键 codec 插件 - 选中文本 Base64 编码
+关键词: codec 插件, handle, 右键菜单, allow-custom-context-menu-execute, Base64
+适用场景: 在 MITM/Fuzzer/History 编辑器里选中一段文本, 右键 -> 插件扩展 -> 本插件, 立刻得到 Base64
+验证: yak codec-plugin --script codec-base64-wrap.yak --input "admin:123456"
+
+启用右键: 在 Yakit 插件编辑器把插件类型设为 codec, 打开开关 "用于数据包右键"
+        (对应给 YakScript.Tags 加 tag: allow-custom-context-menu-execute)
+契约: codec 插件只需定义 handle(input) 返回字符串; 引擎右键执行时把选中内容作为 input
+*/
+
+// codec 插件唯一入口: handle(input) -> string
+// 关键词: handle, codec.EncodeBase64
+handle = func(input) {
+    return codec.EncodeBase64(input)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+yak <file> 直接跑时自测; Yakit 加载时只注册 handle
+*/
+func runSelfTest() {
+    log.info("start codec base64 wrap self test")
+
+    out = handle("admin:123456")
+    log.info("encoded: " + out)
+    assert out == "YWRtaW46MTIzNDU2", f"unexpected base64 output: ${out}"
+    // 回环: 解码应还原
+    assert string(codec.DecodeBase64(out)~) == "admin:123456", "base64 roundtrip should restore origin"
+
+    log.info("codec base64 wrap self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

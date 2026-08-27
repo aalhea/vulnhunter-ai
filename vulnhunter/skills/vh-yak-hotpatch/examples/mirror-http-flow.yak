@@ -1,0 +1,43 @@
+/*
+示例: [全局] mirrorHTTPFlow 全站流量审计计数
+关键词: 全局热加载, GlobalHotPatch, mirrorHTTPFlow, 全站审计, 仅观察
+适用场景: 全局层面对所有经过的流量做统一计数/审计 (MITM 与 Fuzzer 都会汇入), 镜像类只观察不改写
+参考: yak-project-public 009 全局热加载
+
+签名: mirrorHTTPFlow(isHttps, url, req, rsp, body) (镜像类无 forward/drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+AUDIT = {"total": 0, "https": 0}
+
+mirrorHTTPFlow = func(isHttps, url, req, rsp, body) {
+    AUDIT["total"] = AUDIT["total"] + 1
+    if isHttps {
+        AUDIT["https"] = AUDIT["https"] + 1
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global mirror http flow audit self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: t.local\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorHTTPFlow(false, "http://t.local/a", req, rsp, []byte("ok"))
+    mirrorHTTPFlow(true, "https://t.local/b", req, rsp, []byte("ok"))
+    mirrorHTTPFlow(true, "https://t.local/c", req, rsp, []byte("ok"))
+
+    log.info(sprintf("audit: total=%d https=%d", AUDIT["total"], AUDIT["https"]))
+    assert AUDIT["total"] == 3, "should count all 3 flows"
+    assert AUDIT["https"] == 2, "should count 2 https flows"
+
+    log.info("global mirror http flow audit self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

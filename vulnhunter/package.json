@@ -1,0 +1,61 @@
+{
+  "name": "dsh-vulnhunter",
+  "description": "DeepSeek Harness (dsh) 漏洞挖掘 Agent 插件：资产测绘→子域枚举→端口扫描→存活探测 AI 流水线，yakit/chrome MCP 联动 Web 漏洞验证，四层仿生记忆，vh-* offensive skills，旧版 SSE MCP 桥。",
+  "version": "0.2.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "./plugin/preset-root.js",
+  "exports": {
+    ".": "./plugin/preset-root.js",
+    "./preset-root": "./plugin/preset-root.js",
+    "./index": "./dist/index.js",
+    "./mcp-sse-bridge": "./dist/mcp-sse-bridge.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*.js",
+    "plugin/**/*.js",
+    "presets/**",
+    "skills/**",
+    "memory/**",
+    "config/**",
+    "docs/**",
+    "AGENTS.md",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "npm run typecheck && npm run build && npm run smoke"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "yaml": "^2.6.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@types/node": "^22.19.0",
+    "tsdown": "^0.12.0",
+    "typescript": "^5.8.0"
+  }
+}

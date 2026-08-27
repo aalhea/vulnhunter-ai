@@ -1,0 +1,45 @@
+/*
+示例: [全局] 默认 Authorization Bearer 自动注入
+关键词: 全局热加载, GlobalHotPatch, Authorization, Bearer, Token, beforeRequest, 统一认证
+适用场景: 内网测试需要所有请求都带同一个 Bearer Token, 用全局热加载统一补充, 缺失才注入, 已有则保留
+参考: yak-project-public 009 (2026-03-18) 全局热加载; 085 (2024-11-27) 全局配置插件环境变量
+
+全局热加载的优势: 一处配置, MITM 与所有 Fuzzer Tab 共享, 无需每个任务单独设置
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+BEARER_TOKEN = "eyJhbGciOiJIUzI1Nidemo.payload.signature"
+
+beforeRequest = func(https, originReq, req) {
+    // 已有 Authorization 则不覆盖, 保留用户原值
+    if poc.GetHTTPPacketHeader(req, "Authorization") != "" {
+        return req
+    }
+    return poc.ReplaceHTTPPacketHeader(req, "Authorization", "Bearer " + BEARER_TOKEN)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global auto bearer self test")
+
+    // 无 Authorization -> 注入
+    plainReq := []byte("GET /api/data HTTP/1.1\r\nHost: api.local\r\n\r\n")
+    out = beforeRequest(true, plainReq, plainReq)
+    auth = poc.GetHTTPPacketHeader(out, "Authorization")
+    log.info("injected authorization: " + auth)
+    assert auth == "Bearer " + BEARER_TOKEN, "Authorization should be injected when missing"
+
+    // 已有 Authorization -> 保留
+    withAuth := []byte("GET /api/data HTTP/1.1\r\nHost: api.local\r\nAuthorization: Bearer user-own-token\r\n\r\n")
+    out2 = beforeRequest(true, withAuth, withAuth)
+    assert poc.GetHTTPPacketHeader(out2, "Authorization") == "Bearer user-own-token", "existing Authorization should be preserved"
+
+    log.info("global auto bearer self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

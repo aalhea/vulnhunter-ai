@@ -1,0 +1,117 @@
+/*
+示例: Yakit MITM + cli 交互式插件 - 加载外部参数驱动被动扫描
+关键词: mitm + cli, 交互式插件, cli.LineDict, cli.String, 外部参数, 作用域, 关键词字典
+适用场景: 同一个 MITM 插件, 不同测试目标要扫不同关键词、限定不同作用域(host)。
+          用 cli 把"关键词字典"和"作用域 host"做成插件参数, 启用 MITM 时由用户填表传入,
+          hook 闭包捕获这些参数后驱动被动扫描。这样无需改代码即可复用同一插件。
+验证:
+  yak mitm-cli-interactive.yak                                  # 自测纯逻辑(走默认参数)
+  yak mitm-cli-interactive.yak --keywords "password,token" --scope shop.example.com
+
+cli 与 hook 的协作:
+  - cli.* 必须写在顶层(模块加载时执行), Yakit 才能扫描出参数表单。
+  - hook 是函数闭包, 运行时捕获顶层 cli 读到的值; 因此参数"加载一次, 全程复用"。
+
+互链:
+  - 被动扫描规则写法见同目录 mitm-passive-scan.yak
+  - cli 参数体系见 skills/yakit-native-plugin/SKILL.md
+*/
+
+// ---- 顶层读取外部参数(Yakit 会据此渲染表单) ----
+// 关键词: cli.LineDict, 外部关键词字典(文件路径或多行文本, 每行一个)
+// 注意: cli.LineDict 按"行"切分(不是逗号), 所以默认值用换行分隔
+KEYWORDS_RAW = cli.LineDict("keywords",
+    cli.setVerboseName("关键词字典"),
+    cli.setHelp("file path or multiline keywords, one per line (comma in a line also accepted)"),
+    cli.setDefault("password\ntoken\nsecret"),
+)
+// 纯函数: 把每行再按逗号摊平, 兼容用户粘贴 CSV
+// 关键词: 关键词解析, 摊平
+flattenKeywords = func(rawList) {
+    out = []
+    for line in rawList {
+        for part in str.Split(line, ",") {
+            p = str.TrimSpace(part)
+            if p != "" { out = append(out, p) }
+        }
+    }
+    return out
+}
+KEYWORDS = flattenKeywords(KEYWORDS_RAW)
+// 关键词: cli.String, 作用域 host(为空则全量)
+SCOPE = cli.String("scope",
+    cli.setVerboseName("作用域 host"),
+    cli.setHelp("only scan flows whose url contains this host; empty = all"),
+    cli.setDefault(""),
+)
+cli.check()
+
+// 纯函数: 判断 url 是否在作用域内(scope 为空表示放行全部)
+// 关键词: 作用域过滤, in scope
+inScope = func(url, scope) {
+    if scope == "" { return true }
+    return str.Contains(url, scope)
+}
+
+// 纯函数: 在内容里匹配关键词字典, 返回命中的关键词列表(大小写不敏感)
+// 关键词: 关键词匹配, 外部参数驱动
+matchKeywords = func(content, keywords) {
+    lower = str.ToLower(content)
+    hits = []
+    for kw in keywords {
+        k = str.TrimSpace(kw)
+        if k == "" { continue }
+        if str.Contains(lower, str.ToLower(k)) {
+            hits = append(hits, k)
+        }
+    }
+    return hits
+}
+
+// MITM 观察 hook: 在作用域内的流量按外部关键词字典扫描响应
+// 关键词: mirrorHTTPFlow, 外部参数驱动的被动扫描
+mirrorHTTPFlow = func(isHttps, url, req, rsp, body) {
+    if !inScope(url, SCOPE) { return }
+    hits = matchKeywords(string(rsp), KEYWORDS)
+    for kw in hits {
+        risk.NewRisk(url,
+            risk.title(sprintf("keyword matched: %s", kw)),
+            risk.type("keyword-hit"),
+            risk.severity("info"),
+            risk.payload(kw),
+        )
+        log.info(sprintf("keyword %s matched at %s", kw, url))
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+直接用显式参数验证 inScope / matchKeywords 两个纯函数, 不依赖命令行与库写入
+*/
+func runSelfTest() {
+    log.info("start mitm-cli-interactive self test")
+
+    // 关键词解析(摊平): 多行 + 行内逗号都要展开
+    log.info(sprintf("loaded keywords: %v scope=%#v", KEYWORDS, SCOPE))
+    assert len(flattenKeywords(["password", "token", "secret"])) == 3, "3 lines -> 3 keywords"
+    assert len(flattenKeywords(["a,b", "c"])) == 3, "csv-in-line should be flattened to 3"
+
+    // 作用域过滤
+    assert inScope("https://shop.example.com/api", "shop.example.com"), "should be in scope"
+    assert !inScope("https://other.com/api", "shop.example.com"), "should be out of scope"
+    assert inScope("https://any.com", ""), "empty scope should pass all"
+
+    // 关键词匹配(大小写不敏感)
+    body = `{"data":{"access_TOKEN":"abc","password":"x"},"msg":"ok"}`
+    hits = matchKeywords(body, ["password", "token", "notexist"])
+    log.info(sprintf("keyword hits: %v", hits))
+    assert "password" in hits, "should match password"
+    assert "token" in hits, "should match token (case-insensitive)"
+    assert !("notexist" in hits), "should not match notexist"
+
+    log.info("mitm-cli-interactive self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}

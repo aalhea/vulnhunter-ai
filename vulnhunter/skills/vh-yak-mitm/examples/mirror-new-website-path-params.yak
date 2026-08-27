@@ -1,0 +1,78 @@
+/*
+示例: [镜像] mirrorNewWebsitePathParams 新参数组合发现
+关键词: mirrorNewWebsitePathParams, MITM 热加载, 参数组合去重, 端点发现, Fuzz 入口, 仅观察
+适用场景: 每个 "路径 + 参数名集合" 的新结构只触发一次, 用于发现可 Fuzz 的端点, 自动喂给 Web Fuzzer
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 镜像类
+
+签名: mirrorNewWebsitePathParams(isHttps, url, req, rsp, body)
+  - 引擎按 "host + path + 参数名集合(结构去重)" 回调, 值不同但参数名相同视为同一结构
+  - 镜像类, 只观察不改写
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 收集每个端点的参数名结构, 用于后续 Fuzz 选靶
+// 关键词: poc.GetAllHTTPRequestQueryParams, 参数名集合, 结构去重
+ENDPOINTS = []
+
+// 参数名集合排序, 保证结构指纹与参数书写顺序无关
+// 关键词: sort.SliceStable 需要 (slice, less), 这里用简单冒泡保持示例自洽
+sortNames = func(names) {
+    out = names
+    for i := 0; i < len(out); i++ {
+        for j := i + 1; j < len(out); j++ {
+            if out[j] < out[i] {
+                tmp = out[i]
+                out[i] = out[j]
+                out[j] = tmp
+            }
+        }
+    }
+    return out
+}
+
+// 提取 host+path 与排序后的参数名集合, 拼成结构指纹
+structFingerprint = func(url) {
+    rest = str.TrimPrefix(str.TrimPrefix(url, "https://"), "http://")
+    parts = str.SplitN(rest, "?", 2)
+    hostPath = parts[0]
+    names = []
+    if len(parts) == 2 && parts[1] != "" {
+        for _, kv := range str.Split(parts[1], "&") {
+            names = append(names, str.SplitN(kv, "=", 2)[0])
+        }
+    }
+    names = sortNames(names)
+    return sprintf("%s?{%s}", hostPath, str.Join(names, ","))
+}
+
+mirrorNewWebsitePathParams = func(isHttps, url, req, rsp, body) {
+    fp = structFingerprint(url)
+    ENDPOINTS = append(ENDPOINTS, fp)
+    log.info("discover new endpoint structure: %s", fp)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start mirror new website path params self test")
+
+    req := []byte("GET / HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    rsp := []byte("HTTP/1.1 200 OK\r\n\r\nok")
+
+    mirrorNewWebsitePathParams(false, "http://target.local/search?q=a&page=1", req, rsp, []byte("ok"))
+    mirrorNewWebsitePathParams(false, "http://target.local/item?id=42", req, rsp, []byte("ok"))
+
+    log.info(sprintf("endpoints: %v", ENDPOINTS))
+    assert len(ENDPOINTS) == 2, "should record 2 endpoint structures"
+    // 参数名集合排序后稳定, 与 query 值无关
+    assert ENDPOINTS[0] == "target.local/search?{page,q}", "search struct should use sorted param names"
+    assert ENDPOINTS[1] == "target.local/item?{id}", "item struct should capture id param"
+
+    log.info("mirror new website path params self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

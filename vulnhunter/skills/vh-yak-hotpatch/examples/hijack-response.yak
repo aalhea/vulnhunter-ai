@@ -1,0 +1,39 @@
+/*
+示例: [全局] hijackHTTPResponse 给所有响应盖全局标记
+关键词: 全局热加载, GlobalHotPatch, hijackHTTPResponse, 全局标记, forward
+适用场景: 全站统一在响应上盖一个全局命中头, 确认全局热加载链路生效 (不带 req 的简化版)
+参考: yak-project-public 009 全局热加载
+
+全局与 MITM 共用 hook (见 mitm-hotpatch/examples/hijack-response.yak), 区别只在全局先执行、跨 MITM+Fuzzer
+签名: hijackHTTPResponse(isHttps, url, rsp, forward, drop)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+GLOBAL_RSP_HEADER = "X-Yakit-Global-Resp"
+
+hijackHTTPResponse = func(isHttps, url, rsp, forward, drop) {
+    forward(poc.ReplaceHTTPPacketHeader(rsp, GLOBAL_RSP_HEADER, "1"))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start global hijack response mark self test")
+
+    captured = {"rsp": []byte("")}
+    forward = func(b) { captured["rsp"] = b }
+    drop = func() { log.error("should not drop") }
+
+    rsp := []byte("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html></html>")
+    hijackHTTPResponse(false, "http://target.local/", rsp, forward, drop)
+    assert poc.GetHTTPPacketHeader(captured["rsp"], GLOBAL_RSP_HEADER) == "1", "every response should carry global marker"
+    assert string(poc.GetHTTPPacketBody(captured["rsp"])) == "<html></html>", "body should remain intact"
+
+    log.info("global hijack response mark self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

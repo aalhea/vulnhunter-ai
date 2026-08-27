@@ -1,0 +1,235 @@
+/* VHModeCards — 四模式入口卡片（缩写版） */
+
+@keyframes vh-fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes vh-shine-sweep {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 780px);
+  margin: 0 auto;
+  padding: 12px 0;
+}
+
+.compact {
+  max-width: 100%;
+  padding: 4px 0;
+}
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+.compact .modeGrid {
+  gap: 8px;
+}
+
+/* 卡片：玻璃态 + 居中缩写主视觉 */
+.modeCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 12px 14px;
+  border-radius: 14px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+
+  background: var(--vh-panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  border: 1px solid var(--vh-border);
+  box-shadow:
+    inset 0 1px 0 var(--vh-glass-hi),
+    var(--vh-shadow);
+
+  /* 入场动画：初始隐藏 */
+  opacity: 0;
+  transform: translateY(16px);
+  filter: blur(4px);
+  transition:
+    border-color 250ms cubic-bezier(.22, .61, .36, 1),
+    box-shadow 250ms cubic-bezier(.22, .61, .36, 1),
+    transform 200ms cubic-bezier(.22, .61, .36, 1),
+    background 200ms ease;
+}
+
+.compact .modeCard {
+  gap: 7px;
+  padding: 12px 8px 10px;
+  border-radius: 11px;
+}
+
+/* 入场动画触发 */
+.modeCard.entered {
+  animation: vh-fade-slide-up 400ms cubic-bezier(.22, .61, .36, 1) forwards;
+}
+
+/* Hover：上浮 + 双色霓虹描边光晕 */
+.modeCard:hover {
+  transform: translateY(-4px);
+  border-color: var(--vh-accent-border);
+  background: var(--vh-panel-raised);
+  box-shadow:
+    inset 0 1px 0 var(--vh-glass-hi, rgba(255, 255, 255, 0.06)),
+    var(--vh-shadow-lg),
+    var(--vh-glow-sm),
+    0 0 0 1px rgba(0, 245, 212, 0.08);
+}
+
+/* 聚焦可见 */
+.modeCard:focus-visible {
+  border-color: var(--vh-accent-border);
+  box-shadow: 0 0 0 2px var(--vh-accent-ring);
+}
+
+/* 点击回弹 */
+.modeCard.clicked {
+  transform: scale(0.97);
+  transition-duration: 100ms;
+}
+
+/* 流光扫过效果（hover 时伪元素） */
+.modeCard::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 14px;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.07) 45%,
+    rgba(255, 255, 255, 0.13) 50%,
+    rgba(255, 255, 255, 0.07) 55%,
+    transparent 60%,
+    transparent 100%
+  );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.compact .modeCard::after {
+  border-radius: 11px;
+}
+
+.modeCard:hover::after {
+  opacity: 1;
+  animation: vh-shine-sweep 600ms ease forwards;
+}
+
+/* 缩写字母方块：主视觉 */
+.cardIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 14px rgba(2, 6, 23, 0.35);
+  transition: transform 250ms cubic-bezier(.22, .61, .36, 1), box-shadow 250ms ease;
+}
+
+.compact .cardIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 3px 10px rgba(2, 6, 23, 0.28);
+}
+
+.modeCard:hover .cardIcon {
+  transform: scale(1.1) rotate(-3deg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 20px rgba(2, 6, 23, 0.5),
+    0 0 22px rgba(0, 245, 212, 0.3),
+    0 0 44px rgba(0, 187, 249, 0.12);
+}
+
+.cardIconText {
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.compact .cardIconText {
+  font-size: 16px;
+}
+
+/* 精简介绍小字 */
+.cardDesc {
+  font-size: 11px;
+  line-height: 15px;
+  letter-spacing: 0.01em;
+  color: var(--vh-text-2);
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+
+.compact .cardDesc {
+  font-size: 10px;
+  line-height: 13px;
+}
+
+/* 响应式：窄屏单列 */
+@media (max-width: 640px) {
+  .modeGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 减小动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .modeCard {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    animation: none !important;
+    transition: none;
+  }
+  .modeCard::after {
+    animation: none !important;
+    opacity: 0;
+  }
+  .modeCard:hover {
+    transform: none;
+  }
+}

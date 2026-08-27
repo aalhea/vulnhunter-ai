@@ -1,0 +1,193 @@
+/*
+示例: 右键 codec 插件(History 单选/多选) - 由 flow id 反查数据包, 提取该 host 全部 path 与参数名
+关键词: codec 插件, History 右键, flow id, db.QueryHTTPFlowsByID, db.QueryHTTPFlowsByKeyword, yakit.SetProgress, 进度条
+适用场景: 在 History 里选中一条(或多条)记录右键 -> 插件扩展 -> 本插件。Yakit 传进来的不是文本,
+          而是这条记录的 flow id(多选则是逗号分隔的多个 id)。插件据此反查数据包, 拿到 host,
+          再把该 host 在 History 里出现过的所有唯一 path 与 query 参数名汇总出来, 带进度条。
+验证: yak codec-history-extract-paths.yak              # 自测纯逻辑(不依赖真实 History)
+      yak codec-history-extract-paths.yak --real 5     # 可选: 用真实库里 id=5 的流量跑一遍
+
+关键契约(来自 yakit 前端, 已核实):
+  - History 单条右键 codec 插件: 传入 handle 的 input = 该行 flow 的 Id (字符串, 如 "1287")
+  - History 多选右键 codec 插件: input = 多个 Id 逗号拼接 (如 "1287,1290,1305")
+  - 见 yakit: components/HTTPFlowTable/useHTTPFlowTableContextMenu.tsx
+    (单选 text=`${rowData.Id}`, 多选 text=selectedRowKeys.join(','))
+
+涉及的 db "Yield" 通道接口:
+  - db.QueryHTTPFlowsByID(ids...)      返回 *HTTPFlow 通道(底层 yakit.YieldHTTPFlows)
+  - db.QueryHTTPFlowsByKeyword(host)   返回 *HTTPFlow 通道(底层 yakit.YieldHTTPFlows)
+
+互链:
+  - codec 插件契约/右键启用见 skills/yakit-rightclick-plugin/SKILL.md
+  - 历史数据提取扫描见 skills/yakit-data-extract-plugin/SKILL.md
+*/
+
+// 纯函数: 解析 input 里的 flow id 列表(单个或逗号分隔)
+// 关键词: flow id 解析
+parseIds = func(input) {
+    ids = []
+    for part in str.Split(input, ",") {
+        p = str.TrimSpace(part)
+        if p == "" { continue }
+        n, err = atoi(p)
+        if err != nil { continue }
+        if n > 0 { ids = append(ids, int64(n)) }
+    }
+    return ids
+}
+
+// 纯函数: 从 url 取 host (scheme 之后到第一个 / 之前)
+// 关键词: host 提取
+hostOf = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    return str.SplitN(rest, "/", 2)[0]
+}
+
+// 纯函数: 从 url 取归一化 path(去 scheme/host/query)
+// 关键词: path 归一化
+pathOf = func(rawURL) {
+    rest = str.TrimPrefix(str.TrimPrefix(rawURL, "https://"), "http://")
+    idx = str.IndexByte(rest, '/')
+    if idx < 0 { return "/" }
+    p = rest[idx:]
+    return str.SplitN(p, "?", 2)[0]
+}
+
+// 纯函数: 从 (url, 原始请求字节) 列表提取唯一 path 与唯一 query 参数名
+// 关键词: 提取核心, path 去重, 参数名去重, poc.GetAllHTTPPacketQueryParams
+extractPathsAndParams = func(pairs) {
+    pathSeen = {}
+    paths = []
+    paramSeen = {}
+    params = []
+    for p in pairs {
+        path = pathOf(p.url)
+        if !(path in pathSeen) {
+            pathSeen[path] = true
+            paths = append(paths, path)
+        }
+        // 从原始请求里取 query 参数名(更稳); p.req 是 []byte
+        for name in poc.GetAllHTTPPacketQueryParams(p.req) {
+            if !(name in paramSeen) {
+                paramSeen[name] = true
+                params = append(params, name)
+            }
+        }
+    }
+    return {"paths": paths, "params": params}
+}
+
+// 纯函数: 把结果格式化为可读文本(右键面板展示用)
+// 关键词: 结果格式化
+formatResult = func(host, ext) {
+    lines = [sprintf("# host: %s", host)]
+    lines = append(lines, sprintf("## paths (%d)", len(ext.paths)))
+    for path in ext.paths { lines = append(lines, path) }
+    lines = append(lines, sprintf("## query params (%d)", len(ext.params)))
+    for name in ext.params { lines = append(lines, name) }
+    return str.Join(lines, "\n")
+}
+
+// 生产入口: codec 右键唯一契约 handle(input)
+// 关键词: handle, codec 插件入口, flow id -> 数据包 -> 提取
+handle = func(input) {
+    ids = parseIds(input)
+    if len(ids) == 0 { return "no valid flow id in input: " + input }
+
+    // 1) 由 flow id 反查数据包, 收集涉及的 host(去重)
+    hostSeen = {}
+    hosts = []
+    for flow in db.QueryHTTPFlowsByID(ids...) {
+        h = hostOf(flow.Url)
+        if h != "" && !(h in hostSeen) {
+            hostSeen[h] = true
+            hosts = append(hosts, h)
+        }
+    }
+    if len(hosts) == 0 { return "no flow found for ids: " + input }
+
+    // 2) 逐 host 把 History 里该 host 的全部流量捞出来提取 path/param, 带进度条
+    // 注意: yak 对 slice 的 `for i, v in arr` 会得到 (元素, nil), 不是 (索引, 元素);
+    //       要索引就自己维护计数器 done
+    out = []
+    total = len(hosts)
+    done = 0
+    for host in hosts {
+        // 关键词: yakit.SetProgress, 进度条
+        yakit.SetProgress(float(done) / float(total))
+
+        pairs = []
+        for f in db.QueryHTTPFlowsByKeyword(host) {
+            // flow.Request 是 strconv-quote 后的字符串, 需还原为原始字节
+            req = codec.StrconvUnquote(f.Request)~
+            pairs = append(pairs, {"url": f.Url, "req": []byte(req)})
+        }
+        ext = extractPathsAndParams(pairs)
+        out = append(out, formatResult(host, ext))
+        done++
+    }
+    yakit.SetProgress(1.0)   // 完成
+    return str.Join(out, "\n\n")
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+默认用合成 (url, request) 验证纯提取逻辑, 不依赖真实 History;
+传 --real <id> 时改跑真实 handle(展示 flow id -> 数据包 -> 提取的完整链路)
+*/
+func runSelfTest() {
+    log.info("start codec-history-extract-paths self test")
+
+    // parseIds: 单个与逗号分隔
+    assert len(parseIds("1287")) == 1, "single id"
+    assert len(parseIds("1287,1290, 1305")) == 3, "multiple ids comma separated"
+    assert len(parseIds("")) == 0, "empty input -> no id"
+
+    // host / path 提取
+    assert hostOf("https://shop.example.com/api/x?a=1") == "shop.example.com", "hostOf"
+    assert pathOf("https://shop.example.com/api/order/list?page=2") == "/api/order/list", "pathOf strips query"
+
+    // extractPathsAndParams: 去重
+    mkReq = func(target) { return []byte("GET " + target + " HTTP/1.1\r\nHost: shop.example.com\r\n\r\n") }
+    pairs = [
+        {"url": "https://shop.example.com/api/order/list?page=1", "req": mkReq("/api/order/list?page=1")},
+        {"url": "https://shop.example.com/api/order/list?page=2", "req": mkReq("/api/order/list?page=2")},
+        {"url": "https://shop.example.com/api/user/profile?id=7", "req": mkReq("/api/user/profile?id=7")},
+    ]
+    ext = extractPathsAndParams(pairs)
+    log.info(sprintf("paths=%v params=%v", ext.paths, ext.params))
+    assert len(ext.paths) == 2, f"order/list dedup -> 2 paths, got ${len(ext.paths)}"
+    assert "page" in ext.params, "should collect query param page"
+    assert "id" in ext.params, "should collect query param id"
+
+    // formatResult 含关键信息
+    txt = formatResult("shop.example.com", ext)
+    assert str.Contains(txt, "shop.example.com"), "result should contain host"
+    assert str.Contains(txt, "/api/user/profile"), "result should list path"
+
+    log.info("codec-history-extract-paths self test passed")
+}
+
+// --real <id>: 用真实库数据演示 handle(flow id -> 数据包 -> 提取)
+func runReal() {
+    id = ""
+    args = cli.Args()
+    n = len(args)
+    idx = 0
+    for idx < n {
+        if args[idx] == "--real" && idx+1 < n { id = args[idx+1] }
+        idx++
+    }
+    if id == "" { id = "1" }
+    log.info("run real handle with flow id = " + id)
+    result = handle(id)
+    log.info("result:\n" + result)
+}
+
+if YAK_MAIN {
+    if "--real" in cli.Args() {
+        runReal()
+    } else {
+        runSelfTest()
+    }
+}

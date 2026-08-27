@@ -1,0 +1,52 @@
+/*
+示例: [Web Fuzzer] mockHTTPRequest 离线 mock 响应做无目标联调
+关键词: mockHTTPRequest, Web Fuzzer 热加载, mock 响应, 离线联调, 本地响应替代
+适用场景: 目标接口还没上线或不可达时, 用 mockHTTPRequest 给特定路径返回构造好的响应,
+         让 Fuzzer 流程 (payload 渲染/重试/失败判定) 在没有真实服务时也能跑通联调
+参考: yak-project-public 024 Mock 重塑无污染客户端测试; 043 热加载函数
+
+签名: mockHTTPRequest(https, url, req, mockResponse)
+  - 调用 mockResponse(rsp) 用本地响应替代真实请求; 不调用则正常出站
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+MOCK_PATH = "/api/not-ready-yet"
+
+mockHTTPRequest = func(https, url, req, mockResponse) {
+    if !str.Contains(url, MOCK_PATH) {
+        return
+    }
+    seq = poc.GetHTTPPacketBody(req)
+    body = json.dumps({"ok": true, "echo": string(seq), "mocked": true}, json.withIndent(""))
+    log.info("mock response served for: %s", url)
+    mockResponse("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Mocked: 1\r\nContent-Length: " + sprintf("%d", len(body)) + "\r\n\r\n" + body)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start webfuzzer mock http request self test")
+
+    captured = {"rsp": ""}
+    mockResponse = func(rsp) { captured["rsp"] = rsp }
+
+    req := []byte("POST /api/not-ready-yet HTTP/1.1\r\nHost: t.local\r\n\r\nping")
+    mockHTTPRequest(false, "http://t.local/api/not-ready-yet", req, mockResponse)
+    assert captured["rsp"] != "", "target path should be mocked"
+    assert str.Contains(captured["rsp"], "X-Mocked: 1"), "mock response should carry marker"
+    assert str.Contains(captured["rsp"], "\"echo\":\"ping\""), "mock should echo request body"
+    log.info("mocked: " + captured["rsp"])
+
+    captured["rsp"] = ""
+    other := []byte("GET /api/ready HTTP/1.1\r\nHost: t.local\r\n\r\n")
+    mockHTTPRequest(false, "http://t.local/api/ready", other, mockResponse)
+    assert captured["rsp"] == "", "non-target path should pass through"
+
+    log.info("webfuzzer mock http request self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

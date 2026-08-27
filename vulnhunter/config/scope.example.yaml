@@ -1,0 +1,29 @@
+# dsh-vulnhunter 授权范围文件（示例模板）
+#
+# 用法：复制为 <target>/scope.yaml 按目标填写；会话开场把该文件路径告诉 agent。
+# persona §11 以本文件为唯一授权边界：白名单内径自推进，之外一律不动。
+# P1 起 scope guard 在 tools/pre-execute 强制拦截白名单外目标；当前版本靠纪律执行。
+#
+# 合规提醒：仅对自有资产 / SRC 平台收录范围 / 有书面授权的目标使用。
+
+target: example-corp            # 目标代号（账本与报告目录名）
+anchors:
+  domains:
+    - example.com
+    - '*.example.com'           # 通配符按后缀匹配
+  company:
+    - 示例科技有限公司           # 触发 enscan 公司名测绘
+  cidr: []                      # 如授权含 IP 段再填
+excludes:                       # 显式排除，命中即拒绝测试
+  - mail.example.com
+  - '*.gov.cn'
+rules:
+  passive_first: true           # 被动情报优先，主动扫描限速
+  max_requests_per_sec: 10
+  red_lines:                    # 与 persona §11 红线一致，此处可加严
+    - no_data_destruction
+    - no_bulk_export
+    - no_dos
+    - no_prod_config_change
+authorized_by: "SRC 平台项目编号 / 授权书编号"
+valid_until: "2026-12-31"

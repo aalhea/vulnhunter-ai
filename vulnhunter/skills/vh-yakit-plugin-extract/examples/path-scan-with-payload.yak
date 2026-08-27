@@ -1,0 +1,125 @@
+/*
+示例: [数据驱动扫描] 去重路径 -> 存入 Payload 字典 -> 带登录 Cookie 发包扫描
+关键词: db.SavePayload, db.YieldPayload, db.DeletePayloadByGroup, poc.HTTP, 路径扫描, 登录态扫描
+适用场景: 截图痛点续 - 把 collect-domain-urls.yak 收集到的唯一路径沉淀成 Yakit
+          Payload 字典 (持久化, 可在 Web Fuzzer / 扫描器复用), 再带着登录 Cookie 对目标
+          逐路径发包, 用状态码区分存活/不存在
+
+证据: 本自测会在本地随机端口起一个真实 HTTP 靶站, 真正发出 HTTP 请求并校验:
+  - 已知路径返回 200, 未知路径返回 404
+  - 登录 Cookie 被正确带到服务端 (响应体里回显)
+
+互链:
+  - 数据来源 (URI 去重 + Cookie 提取) 见 collect-domain-urls.yak
+  - Payload 字典 API 见 skills/yaklang-database/SKILL.md
+*/
+
+// 去重路径列表
+// 关键词: 路径去重
+dedupPaths = func(paths) {
+    seen = {}
+    out = []
+    for p in paths {
+        if !(p in seen) {
+            seen[p] = true
+            out = append(out, p)
+        }
+    }
+    return out
+}
+
+// 带 Cookie 对单条路径发包, 返回状态码与响应体
+// 关键词: poc.HTTP, 登录态发包, 状态码
+scanPath = func(hostport, path, cookie) {
+    raw = sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\nConnection: close\r\n\r\n", path, hostport, cookie)
+    rsp, _ = poc.HTTP(raw, poc.timeout(5), poc.save(false))~
+    return {"code": poc.GetStatusCodeFromResponse(rsp), "body": string(poc.GetHTTPPacketBody(rsp))}
+}
+
+// 生产用法: 把去重路径存入字典, 再逐条扫描
+// 关键词: db.SavePayload, db.YieldPayload, 字典驱动扫描
+scanWithDict = func(group, hostport, cookie) {
+    results = {}
+    for path in db.YieldPayload(group) {
+        results[path] = scanPath(hostport, path, cookie)
+    }
+    return results
+}
+
+/*
+========== 自测块 ==========
+起本地真实靶站 + 临时 Payload 字典, 端到端验证字典驱动扫描
+*/
+func runSelfTest() {
+    log.info("start path-scan-with-payload self test")
+
+    port = os.GetRandomAvailableTCPPort()
+    hostport = sprintf("127.0.0.1:%d", port)
+    KNOWN = {"/admin": true, "/api/users": true, "/login": true}
+
+    // 启动本地靶站: 已知路径 200 并回显 cookie, 其余 404
+    handler = func(w, r) {
+        path = r.URL.Path
+        ck = r.Header.Get("Cookie")
+        if path in KNOWN {
+            w.WriteHeader(200)
+            w.Write([]byte(sprintf("OK cookie=%s", ck)))
+        } else {
+            w.WriteHeader(404)
+            w.Write([]byte("not found"))
+        }
+    }
+    go func() {
+        err = httpserver.Serve("127.0.0.1", port, httpserver.handler(handler))
+        if err != nil {
+            log.error(sprintf("http server exit: %v", err))
+        }
+    }()
+
+    // 等待靶站就绪
+    ready = false
+    for i = 0; i < 30; i++ {
+        rsp, _, err = poc.HTTP(sprintf("GET /login HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", hostport), poc.timeout(2), poc.save(false))
+        if err == nil && poc.GetStatusCodeFromResponse(rsp) == 200 {
+            ready = true
+            break
+        }
+        sleep(0.1)
+    }
+    assert ready, "local target server should be ready"
+
+    // 合成 (带重复) 路径, 去重后存入临时字典
+    rawPaths = ["/admin", "/api/users", "/admin", "/login", "/not-exist", "/api/users"]
+    paths = dedupPaths(rawPaths)
+    log.info(sprintf("deduped paths: %v", paths))
+    assert len(paths) == 4, f"should dedup to 4 paths, got ${len(paths)}"
+
+    group = sprintf("yak-skills-scan-%d", port)
+    db.DeletePayloadByGroup(group)
+    db.SavePayload(group, paths)~
+    defer db.DeletePayloadByGroup(group)
+
+    cookie = "SESSION=login-token-xyz"
+    results = scanWithDict(group, hostport, cookie)
+
+    for path in paths {
+        log.info(sprintf("scan %s -> code=%d", path, results[path].code))
+    }
+
+    // 已知路径 200, 未知路径 404
+    assert results["/admin"].code == 200, "admin should be 200"
+    assert results["/api/users"].code == 200, "api/users should be 200"
+    assert results["/login"].code == 200, "login should be 200"
+    assert results["/not-exist"].code == 404, "not-exist should be 404"
+
+    // 登录 Cookie 被带到服务端
+    assert str.Contains(results["/admin"].body, cookie), "login cookie should reach the server"
+
+    log.info("path-scan-with-payload self test passed")
+}
+
+// yak 不会自动调用 func main(), 顶层语句才会执行; 用 YAK_MAIN 守卫,
+// 这样命令行 (YAK_MAIN=true) 跑自测, 被当模块加载时 (YAK_MAIN=false) 不执行
+if YAK_MAIN {
+    runSelfTest()
+}

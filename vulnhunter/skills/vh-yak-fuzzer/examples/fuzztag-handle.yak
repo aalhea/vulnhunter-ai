@@ -1,0 +1,53 @@
+/*
+示例: [工具] 自定义 fuzz tag 计算哈希 (MD5/SHA1/SHA256/SM3)
+关键词: fuzz tag, Web Fuzzer 热加载, yak tag, MD5, SHA256, SM3, payload 变形
+适用场景: 在数据包里用 {{yak(hash|算法,明文)}} 动态计算哈希, 常用于签名/弱口令哈希爆破
+参考: yak-project-public 252 (2022-10-20) 用 Fuzztag 生成与变形 Payload; 160 FuzzTag 全解
+
+用法: 在 Web Fuzzer 数据包中写 {{yak(hash|md5,admin)}} / {{yak(hash|sm3,test)}}
+机制: 热加载里定义的普通函数即可作为 {{yak(函数名|参数)}} 标签被调用, 返回数组每个元素是一个 payload
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 第一个参数是算法名, 第二个是明文, 用逗号分隔
+hash = func(param) {
+    parts = str.SplitN(param, ",", 2)
+    if len(parts) < 2 {
+        return [""]
+    }
+    algo = str.ToLower(str.TrimSpace(parts[0]))
+    data = parts[1]
+    if algo == "md5" { return [codec.Md5(data)] }
+    if algo == "sha1" { return [codec.Sha1(data)] }
+    if algo == "sha256" { return [codec.Sha256(data)] }
+    if algo == "sm3" { return [codec.EncodeToHex(codec.Sm3(data))] }
+    return [""]
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start fuzztag hash self test")
+
+    md5v = hash("md5,hello")[0]
+    log.info("md5(hello) = " + md5v)
+    assert md5v == "5d41402abc4b2a76b9719d911017c592", "md5 mismatch"
+
+    sha256v = hash("sha256,hello")[0]
+    log.info("sha256(hello) = " + sha256v)
+    assert sha256v == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", "sha256 mismatch"
+
+    sm3v = hash("sm3,abc")[0]
+    log.info("sm3(abc) = " + sm3v)
+    assert sm3v == "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0", "sm3 mismatch"
+
+    assert hash("md4,abc")[0] == "", "unknown algo should return empty"
+
+    log.info("fuzztag hash self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

@@ -1,0 +1,48 @@
+/*
+示例: [全局管线] afterRequest 响应回写前最后改写
+关键词: afterRequest, MITM 热加载, 返回值提交, 响应回写前, 调试标记
+适用场景: 在响应回写客户端的最后时刻统一打调试标记/补充头, 此 hook 在 hijack response 之后执行
+参考: yak-project-public 031 (2025-10-17) MITM 热加载全流程解析 beforeRequest/afterRequest
+
+签名: afterRequest(isHttps, oreq, req, orsp, rsp)
+  - orsp: 原始响应; rsp: 经 hijackHTTPResponse(Ex) 改写后的响应
+  - 关键区别: afterRequest 用 return rsp 提交修改 (不是 forward), 返回 nil/不返回则用原 rsp
+  - 执行顺序: hijackHTTPResponseEx(可改写/丢弃) -> afterRequest(回写前最后一刻)
+*/
+
+// ===== HOT PATCH TEMPLATE START =====
+// 给经过 MITM 的响应统一打一个调试头, 方便客户端确认链路命中了热加载
+// 关键词: poc.ReplaceHTTPPacketHeader, poc.GetStatusCodeFromResponse
+DEBUG_HEADER = "X-Yak-Mitm"
+
+afterRequest = func(isHttps, oreq, req, orsp, rsp) {
+    code = poc.GetStatusCodeFromResponse(rsp)
+    return poc.ReplaceHTTPPacketHeader(rsp, DEBUG_HEADER, sprintf("hit; status=%d", code))
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start after request mark self test")
+
+    oreq := []byte("GET / HTTP/1.1\r\nHost: target.local\r\n\r\n")
+    req := oreq
+    orsp := []byte("HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 2\r\n\r\nno")
+    rsp := orsp
+
+    out = afterRequest(false, oreq, req, orsp, rsp)
+    mark = poc.GetHTTPPacketHeader(out, DEBUG_HEADER)
+    log.info("debug mark: " + mark)
+    assert str.Contains(mark, "hit"), "debug header should be added"
+    assert str.Contains(mark, "status=404"), "status code should be captured"
+    // body 不应被破坏
+    assert string(poc.GetHTTPPacketBody(out)) == "no", "response body should remain intact"
+
+    log.info("after request mark self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
+// ===== HOT PATCH TEMPLATE END =====

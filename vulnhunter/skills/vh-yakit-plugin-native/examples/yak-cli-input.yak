@@ -1,0 +1,106 @@
+/*
+示例: Yakit 原生 yak 插件 - 用 cli 作为用户输入
+关键词: 原生插件, yak 插件, cli.String, cli.Urls, cli.Ports, cli.Int, cli.Bool, cli.check
+适用场景: 写一个有"参数表单"的 yak 原生插件。Yakit 会扫描脚本里的 cli.* 调用，
+          自动在插件执行页渲染出对应的输入框/下拉/开关；运行时把用户填的值注入回来。
+验证: yak yak-cli-input.yak --target "yaklang.com,example.com:8443" --ports 80,443 --concurrent 20 --probe
+
+cli 参数 -> Yakit 表单控件 的对应关系(常用):
+  cli.String  -> 单行文本     cli.Text -> 多行文本     cli.Int -> 数字
+  cli.Bool    -> 开关         cli.Urls -> URL 列表     cli.Ports -> 端口
+  cli.StringSlice + setSelectOption -> 下拉框          cli.File/cli.FileOrContent -> 文件
+  选项: setRequired / setDefault / setVerboseName(中文名) / setHelp / setCliGroup(分组)
+
+互链:
+  - cli 参数与原生插件契约见 skills/yakit-native-plugin/SKILL.md
+  - 在 mitm 插件里复用 cli 见同目录 mitm-cli-interactive.yak
+*/
+
+// 纯函数: 把 host 列表与 port 列表组合为去重后的 host:port 候选集
+// 把这块核心逻辑抽成纯函数, 才能脱离命令行 / 网络做可重复自测
+// 关键词: 目标规整, 去重, host:port
+buildCandidates = func(hosts, ports) {
+    seen = {}
+    out = []
+    for host in hosts {
+        h = str.TrimSpace(host)
+        if h == "" { continue }
+        // 去掉 scheme, 只留 host[:port]
+        h = str.TrimPrefix(str.TrimPrefix(h, "https://"), "http://")
+        h = str.SplitN(h, "/", 2)[0]
+        for port in ports {
+            key = sprintf("%s:%d", str.SplitN(h, ":", 2)[0], port)
+            if key in seen { continue }
+            seen[key] = true
+            out = append(out, key)
+        }
+    }
+    return out
+}
+
+// 生产入口: 读取 cli 参数 -> 组装候选 -> (示例里只打印, 真实插件可在此发包/扫描)
+// 关键词: cli.check, 参数注入, 原生插件主流程
+func runPlugin() {
+    // 关键词: cli.Urls, URL 列表参数
+    targets = cli.Urls("target",
+        cli.setVerboseName("扫描目标"),
+        cli.setHelp("target urls or host:port list, comma separated"),
+        cli.setRequired(true),
+    )
+    // 关键词: cli.Ports, 端口参数
+    ports = cli.Ports("ports",
+        cli.setVerboseName("端口列表"),
+        cli.setDefault("80,443"),
+    )
+    // 关键词: cli.Int, 数字参数
+    concurrent = cli.Int("concurrent",
+        cli.setVerboseName("并发数"),
+        cli.setDefault(10),
+    )
+    // 关键词: cli.Bool, 开关参数
+    probe = cli.Bool("probe", cli.setVerboseName("启用存活探测"))
+    // 关键词: cli.check, 必填校验(缺失则打印帮助并退出)
+    cli.check()
+
+    // cli.Urls 会把目标补全为 http(s)://host, 这里仍用纯函数从中提取 host:port
+    candidates = buildCandidates(targets, ports)
+    log.info(sprintf("built %d host:port candidates, concurrent=%d probe=%v",
+        len(candidates), concurrent, probe))
+    for c in candidates {
+        log.info("candidate: " + c)
+    }
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+只验证 buildCandidates 纯逻辑, 不依赖命令行参数与网络
+*/
+func runSelfTest() {
+    log.info("start yak-cli-input self test")
+
+    hosts = ["https://shop.example.com", "shop.example.com", "http://api.example.com/path"]
+    ports = [80, 443]
+    got = buildCandidates(hosts, ports)
+    log.info(sprintf("candidates: %v", got))
+
+    // shop.example.com 出现两次(带 scheme / 不带), 应去重; api.example.com 带 path 应被剥离
+    // 期望: shop.example.com:80/443, api.example.com:80/443 共 4 条
+    assert len(got) == 4, f"should dedup to 4 candidates, got ${len(got)}"
+    assert "shop.example.com:443" in got, "shop 443 should exist"
+    assert "api.example.com:80" in got, "api 80 should exist"
+
+    log.info("yak-cli-input self test passed")
+}
+
+// yak 不会自动执行 func main(); Yakit 加载该插件并点击执行时, 引擎以 YAK_MAIN=true 运行顶层,
+// 故真实插件入口应直接调用 runPlugin()。本示例为了可自测做了分流:
+// 注意 cli.Args() 永远含脚本文件名(长度>=1), 带参运行时长度才会 >1
+//   - 无参 (yak yak-cli-input.yak)          -> runSelfTest() 验证纯逻辑
+//   - 带参 (yak yak-cli-input.yak --target ...) -> runPlugin() 体验真实参数注入
+if YAK_MAIN {
+    if len(cli.Args()) > 1 {
+        runPlugin()
+    } else {
+        runSelfTest()
+    }
+}

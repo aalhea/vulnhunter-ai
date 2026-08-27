@@ -1,0 +1,35 @@
+/*
+示例: 右键 codec 插件 - Unicode 转义还原 (\uXXXX -> 中文)
+关键词: codec 插件, handle, 右键菜单, Unicode, 转义还原, JSON 响应
+适用场景: 响应里中文被转成 \u4e2d\u6587, 选中后右键 -> 插件扩展 -> 本插件, 一键还原成可读中文
+验证: yak codec-plugin --script codec-unicode-unescape.yak --input '\u4e2d\u6587abc'
+
+契约: handle(input) -> string
+*/
+
+// codec 插件入口: 把 \uXXXX 还原为对应字符
+// 关键词: handle, codec.UnicodeDecode
+handle = func(input) {
+    return codec.UnicodeDecode(input)
+}
+
+/*
+========== 自测块 (YAK_MAIN 守卫) ==========
+*/
+func runSelfTest() {
+    log.info("start codec unicode unescape self test")
+
+    escaped = `\u4e2d\u6587abc`
+    out = handle(escaped)
+    log.info("unescaped: " + out)
+    assert out == "中文abc", f"unexpected unicode decode output: ${out}"
+
+    // 普通字符串不受影响
+    assert handle("plain text") == "plain text", "plain text should remain unchanged"
+
+    log.info("codec unicode unescape self test passed")
+}
+
+if YAK_MAIN {
+    runSelfTest()
+}
